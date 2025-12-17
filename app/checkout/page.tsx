@@ -29,7 +29,7 @@ import { toast } from "sonner";
 // Declare Razorpay on window
 declare global {
   interface Window {
-    Razorpay: any;
+    Razorpay: new (options: any) => any;
   }
 }
 
