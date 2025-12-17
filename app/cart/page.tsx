@@ -73,7 +73,7 @@ export default function CartPage() {
               <AnimatePresence mode="popLayout">
                 {cart.map((item, index) => {
                   // Get image URL - check both image_url and image fields
-                  const itemData = item as typeof item & { image_url?: string };
+                  const itemData = item as typeof item & { image_url?: string; category?: string };
                   const imageUrl = itemData.image_url || item.image;
                   const hasImage = imageUrl && imageUrl.length > 0;
 
@@ -116,9 +116,9 @@ export default function CartPage() {
                             {item.name}
                           </h3>
                         </Link>
-                        {item.category && (
+                        {itemData.category && (
                           <span className="text-xs text-akusho-neon/70 uppercase tracking-wider">
-                            {item.category}
+                            {itemData.category}
                           </span>
                         )}
 
