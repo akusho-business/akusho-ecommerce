@@ -17,8 +17,16 @@ export default function ProductCard({ product, index = 0 }: ProductCardProps) {
   
   // Use image_url or image field
   const productData = product as Product & { image_url?: string };
-  const imageUrl = productData.image_url || product.image;
+  const imageUrl = productData.image_url || product.image || "";
   const hasImage = imageUrl && imageUrl.length > 0;
+
+  // Handle add to cart with proper type
+  const handleAddToCart = () => {
+    addToCart({
+      ...product,
+      image: imageUrl,
+    } as any);
+  };
 
   return (
     <motion.div
@@ -66,7 +74,7 @@ export default function ProductCard({ product, index = 0 }: ProductCardProps) {
             className="p-3 bg-white rounded-full text-gray-900 dark:text-akusho-deepest"
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.9 }}
-            onClick={() => addToCart(product)}
+            onClick={handleAddToCart}
             aria-label="Add to cart"
           >
             <ShoppingCart className="w-5 h-5" />
@@ -96,7 +104,7 @@ export default function ProductCard({ product, index = 0 }: ProductCardProps) {
           <motion.button
             className="md:hidden p-2 bg-purple-500 dark:bg-akusho-neon rounded-full text-white dark:text-akusho-deepest"
             whileTap={{ scale: 0.9 }}
-            onClick={() => addToCart(product)}
+            onClick={handleAddToCart}
             aria-label="Add to cart"
           >
             <ShoppingCart className="w-4 h-4" />
@@ -105,4 +113,4 @@ export default function ProductCard({ product, index = 0 }: ProductCardProps) {
       </div>
     </motion.div>
   );
-} 
+}
