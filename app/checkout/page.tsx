@@ -26,13 +26,6 @@ import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 
-// Declare Razorpay on window
-declare global {
-  interface Window {
-    Razorpay: new (options: any) => any;
-  }
-}
-
 const SHIPPING_COST = 70;
 
 // Loading Overlay Component
@@ -391,9 +384,19 @@ export default function CheckoutPage() {
 
       setLoadingStatus("processing");
 
+      // Check if Razorpay is available
+      if (typeof window === "undefined" || !(window as any).Razorpay) {
+        throw new Error("Payment gateway not loaded. Please refresh the page.");
+      }
+
+      const razorpayKey = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
+      if (!razorpayKey) {
+        throw new Error("Payment configuration error. Please contact support.");
+      }
+
       // Initialize Razorpay
       const options = {
-        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+        key: razorpayKey,
         amount: Math.round(total * 100),
         currency: "INR",
         name: "AKUSHO",
@@ -473,16 +476,9 @@ export default function CheckoutPage() {
         },
       };
 
-      const razorpay = new window.Razorpay(options);
+      const RazorpayConstructor = (window as any).Razorpay;
+      const razorpay = new RazorpayConstructor(options);
       
-      razorpay.on("payment.failed", function (response: any) {
-        setIsLoading(false);
-        setLoadingStatus("error");
-        toast.error("Payment failed", {
-          description: response.error?.description || "Please try again",
-        });
-      });
-
       razorpay.open();
     } catch (err: any) {
       setLoadingStatus("error");
