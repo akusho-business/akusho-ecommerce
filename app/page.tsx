@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useState, useEffect, useRef, useMemo, memo } from "react";
+import { motion, AnimatePresence, useReducedMotion, useInView } from "framer-motion";
 import Link from "next/link";
 import Image from "next/image";
 import {
@@ -23,6 +23,25 @@ import {
 } from "lucide-react";
 import { Hero, ProductGrid, SectionHeader, Button } from "@/components";
 import { useCart } from "@/context/CartContext";
+
+// ============================================
+// PERFORMANCE UTILITIES
+// ============================================
+
+// Hook to detect if user prefers reduced motion
+function useIsLowPerformance() {
+  const [isLow, setIsLow] = useState(false);
+  const prefersReduced = useReducedMotion();
+  
+  useEffect(() => {
+    // Only reduce animations if user explicitly prefers reduced motion
+    // or has a very low-end device (2 or fewer cores)
+    const isVeryLowEnd = navigator.hardwareConcurrency <= 2;
+    setIsLow(prefersReduced || isVeryLowEnd);
+  }, [prefersReduced]);
+  
+  return isLow;
+}
 
 // ============================================
 // TYPES
@@ -64,7 +83,6 @@ const categoryStyles: Record<string, { gradient: string; color: string }> = {
   "accessories": { gradient: "from-red-600 to-orange-500", color: "#E63946" },
   "limited": { gradient: "from-yellow-500 to-amber-600", color: "#EAB308" },
   "pre-order": { gradient: "from-sky-500 to-blue-500", color: "#0EA5E9" },
-  // Anime series
   "one-piece": { gradient: "from-red-600 to-orange-500", color: "#E63946" },
   "naruto": { gradient: "from-orange-500 to-yellow-500", color: "#FF7B00" },
   "demon-slayer": { gradient: "from-pink-600 to-red-500", color: "#E91E63" },
@@ -79,10 +97,6 @@ const categoryStyles: Record<string, { gradient: string; color: string }> = {
   "default": { gradient: "from-gray-700 to-gray-600", color: "#4B5563" },
 };
 
-const getCategoryStyle = (slug: string) => {
-  return categoryStyles[slug.toLowerCase()] || categoryStyles.default;
-};
-
 // ============================================
 // MAIN PAGE COMPONENT
 // ============================================
@@ -92,28 +106,30 @@ export default function HomePage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [spotlightProduct, setSpotlightProduct] = useState<Product | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const isLowPerf = useIsLowPerformance();
 
-  // Fetch all data on mount
+  // Fetch all data on mount - parallel for speed
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Fetch products
-        const productsRes = await fetch("/api/products?active=true");
-        const productsData = await productsRes.json();
-        setProducts(productsData.products || []);
+        const [productsRes, categoriesRes, spotlightRes] = await Promise.all([
+          fetch("/api/products?active=true"),
+          fetch("/api/categories?withCounts=true"),
+          fetch("/api/settings/spotlight"),
+        ]);
 
-        // Fetch categories with product counts
-        const categoriesRes = await fetch("/api/categories?withCounts=true");
-        const categoriesData = await categoriesRes.json();
+        const [productsData, categoriesData, spotlightData] = await Promise.all([
+          productsRes.json(),
+          categoriesRes.json(),
+          spotlightRes.json(),
+        ]);
+
+        setProducts(productsData.products || []);
         setCategories(categoriesData.categories || []);
 
-        // Fetch spotlight product (the ONE featured product for hero section)
-        const spotlightRes = await fetch("/api/settings/spotlight");
-        const spotlightData = await spotlightRes.json();
         if (spotlightData.product) {
           setSpotlightProduct(spotlightData.product);
         } else {
-          // Fallback: use first featured product if no spotlight set
           const featured = (productsData.products || []).find((p: Product) => p.is_featured);
           setSpotlightProduct(featured || null);
         }
@@ -127,18 +143,17 @@ export default function HomePage() {
     fetchData();
   }, []);
 
-  // Derived data from products
-  const saleProducts = products.filter(p => p.compare_price && p.compare_price > p.price).slice(0, 4);
-  const newArrivals = products.filter(p => p.is_new).slice(0, 8);
-  const featuredProducts = products.filter(p => p.is_featured).slice(0, 4);
-
-  // Recent purchases (from actual orders or simulated from recent products)
-  const recentPurchases = products.slice(0, 4).map((p, i) => ({
-    name: ["Amit", "Sneha", "Raj", "Pooja"][i],
-    city: ["Mumbai", "Delhi", "Bangalore", "Chennai"][i],
-    product: p.name.split(" - ")[0] || p.name,
-    time: `${(i + 1) * 3} min ago`,
-  }));
+  // Memoize derived data to prevent recalculations
+  const { saleProducts, newArrivals, recentPurchases } = useMemo(() => ({
+    saleProducts: products.filter(p => p.compare_price && p.compare_price > p.price).slice(0, 4),
+    newArrivals: products.filter(p => p.is_new).slice(0, 8),
+    recentPurchases: products.slice(0, 4).map((p, i) => ({
+      name: ["Amit", "Sneha", "Raj", "Pooja"][i],
+      city: ["Mumbai", "Delhi", "Bangalore", "Chennai"][i],
+      product: p.name.split(" - ")[0] || p.name,
+      time: `${(i + 1) * 3} min ago`,
+    })),
+  }), [products]);
 
   if (isLoading) {
     return (
@@ -160,22 +175,22 @@ export default function HomePage() {
       <Hero />
 
       {/* Anime Marquee - Shows anime series names */}
-      <AnimeMarquee products={products} />
+      <AnimeMarquee products={products} isLowPerf={isLowPerf} />
 
       {/* Anime Series Carousel - Based on products */}
-      <AnimeSeriesCarousel products={products} />
+      <AnimeSeriesCarousel products={products} isLowPerf={isLowPerf} />
 
       {/* Trust Badges */}
       <TrustBadges />
 
       {/* Flash Sale Section - Products with compare_price */}
       {saleProducts.length > 0 && (
-        <FlashSaleSection products={saleProducts} />
+        <FlashSaleSection products={saleProducts} isLowPerf={isLowPerf} />
       )}
 
       {/* Featured Product Spotlight - THE ONE admin-selected product */}
       {spotlightProduct && (
-        <FeaturedSpotlight product={spotlightProduct} />
+        <FeaturedSpotlight product={spotlightProduct} isLowPerf={isLowPerf} />
       )}
 
       {/* Stats Counter */}
@@ -201,26 +216,26 @@ export default function HomePage() {
       )}
 
       {/* Coming Soon - Anime Katanas */}
-      <ComingSoonKatanas />
+      <ComingSoonKatanas isLowPerf={isLowPerf} />
 
       {/* Testimonials */}
       <TestimonialsSection />
 
       {/* Newsletter */}
-      <NewsletterSection />
+      <NewsletterSection isLowPerf={isLowPerf} />
 
       {/* CTA Section */}
-      <CTASection />
+      <CTASection isLowPerf={isLowPerf} />
     </>
   );
 }
 
 // ============================================
-// COMPONENTS - Updated with Dynamic Data
+// COMPONENTS - With Smart Performance
 // ============================================
 
-// Anime Series Carousel - Based on actual products in database
-function AnimeSeriesCarousel({ products }: { products: Product[] }) {
+// Anime Series Carousel - FULL animations preserved
+function AnimeSeriesCarousel({ products, isLowPerf }: { products: Product[]; isLowPerf: boolean }) {
   const carouselRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(true);
@@ -230,7 +245,6 @@ function AnimeSeriesCarousel({ products }: { products: Product[] }) {
   const seriesData = useMemo(() => {
     const seriesMap: Record<string, { count: number; products: Product[] }> = {};
     
-    // Define series keywords to look for in product names
     const seriesKeywords: Record<string, string[]> = {
       "One Piece": ["luffy", "zoro", "nami", "sanji", "mihawk", "one piece", "egghead"],
       "Dragon Ball": ["goku", "vegeta", "dbz", "dragon ball", "saiyan"],
@@ -242,7 +256,6 @@ function AnimeSeriesCarousel({ products }: { products: Product[] }) {
       "Bleach": ["ichigo", "bleach", "hollow", "shinigami"],
     };
 
-    // Count products per series
     products.forEach(product => {
       const name = product.name.toLowerCase();
       for (const [series, keywords] of Object.entries(seriesKeywords)) {
@@ -252,25 +265,23 @@ function AnimeSeriesCarousel({ products }: { products: Product[] }) {
           }
           seriesMap[series].count++;
           seriesMap[series].products.push(product);
-          break; // Only count in one series
+          break;
         }
       }
     });
 
-    // Convert to array and sort by count
     return Object.entries(seriesMap)
       .map(([name, data]) => ({ name, ...data }))
       .filter(s => s.count > 0)
       .sort((a, b) => b.count - a.count);
   }, [products]);
 
-  // Series styling with images
   const seriesStyles: Record<string, { gradient: string; color: string; image: string }> = {
     "One Piece": { gradient: "from-red-600 to-orange-500", color: "#E63946", image: "/one-piece.jpeg" },
-    "Dragon Ball": { gradient: "from-orange-500 to-yellow-400", color: "#F97316", image: "/series/dragon-ball.jpg" },
+    "Dragon Ball": { gradient: "from-orange-500 to-yellow-400", color: "#F97316", image: "/dragon-ball.jpeg" },
     "Naruto": { gradient: "from-orange-500 to-yellow-500", color: "#FF7B00", image: "/naruto.jpeg" },
-    "Demon Slayer": { gradient: "from-pink-600 to-red-500", color: "#E91E63", image: "/series/demon-slayer.jpg" },
-    "Jujutsu Kaisen": { gradient: "from-purple-700 to-blue-600", color: "#6B21A8", image: "/series/jujutsu-kaisen.jpg" },
+    "Demon Slayer": { gradient: "from-pink-600 to-red-500", color: "#E91E63", image: "/demon-slayer.jpeg" },
+    "Jujutsu Kaisen": { gradient: "from-purple-700 to-blue-600", color: "#6B21A8", image: "/jujutsu-kaisen.jpeg" },
     "Attack on Titan": { gradient: "from-green-800 to-green-600", color: "#2D5A27", image: "/series/attack-on-titan.jpg" },
     "My Hero Academia": { gradient: "from-green-500 to-emerald-400", color: "#22C55E", image: "/series/my-hero-academia.jpg" },
     "Bleach": { gradient: "from-gray-900 to-blue-900", color: "#1E3A8A", image: "/series/bleach.jpg" },
@@ -288,7 +299,7 @@ function AnimeSeriesCarousel({ products }: { products: Product[] }) {
     checkScroll();
     const carousel = carouselRef.current;
     if (carousel) {
-      carousel.addEventListener("scroll", checkScroll);
+      carousel.addEventListener("scroll", checkScroll, { passive: true });
       return () => carousel.removeEventListener("scroll", checkScroll);
     }
   }, [seriesData]);
@@ -300,15 +311,7 @@ function AnimeSeriesCarousel({ products }: { products: Product[] }) {
     }
   };
 
-  // Duplicate series for infinite loop effect
   const displaySeries = [...seriesData, ...seriesData, ...seriesData];
-
-  const scroll = (direction: "left" | "right") => {
-    if (carouselRef.current) {
-      const scrollAmount = direction === "left" ? -400 : 400;
-      carouselRef.current.scrollBy({ left: scrollAmount, behavior: "smooth" });
-    }
-  };
 
   if (seriesData.length === 0) return null;
 
@@ -318,14 +321,14 @@ function AnimeSeriesCarousel({ products }: { products: Product[] }) {
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-0 left-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl" />
         <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl" />
-        {/* Animated floating orbs */}
+        {/* Animated floating orbs - GPU accelerated with will-change */}
         <motion.div 
-          className="absolute top-20 right-1/3 w-32 h-32 bg-akusho-neon/10 rounded-full blur-2xl"
+          className="absolute top-20 right-1/3 w-32 h-32 bg-akusho-neon/10 rounded-full blur-2xl will-change-transform"
           animate={{ y: [0, -30, 0], opacity: [0.3, 0.6, 0.3] }}
           transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
         />
         <motion.div 
-          className="absolute bottom-20 left-1/3 w-40 h-40 bg-pink-500/10 rounded-full blur-2xl"
+          className="absolute bottom-20 left-1/3 w-40 h-40 bg-pink-500/10 rounded-full blur-2xl will-change-transform"
           animate={{ y: [0, 30, 0], opacity: [0.3, 0.6, 0.3] }}
           transition={{ duration: 6, repeat: Infinity, ease: "easeInOut", delay: 1 }}
         />
@@ -344,12 +347,12 @@ function AnimeSeriesCarousel({ products }: { products: Product[] }) {
               <motion.div 
                 className="h-[3px] w-16 rounded-full"
                 style={{ background: "linear-gradient(90deg, #00A8FF, #8B5CF6, #EC4899)" }}
-                animate={{ width: [64, 80, 64] }}
+                animate={isLowPerf ? {} : { width: [64, 80, 64] }}
                 transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
               />
               <div className="flex items-center gap-2 px-3 py-1 bg-akusho-neon/10 border border-akusho-neon/30 rounded-full">
                 <motion.div
-                  animate={{ rotate: 360 }}
+                  animate={isLowPerf ? {} : { rotate: 360 }}
                   transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
                 >
                   <Sparkles className="w-3 h-3 text-akusho-neon" />
@@ -396,7 +399,7 @@ function AnimeSeriesCarousel({ products }: { products: Product[] }) {
               whileHover={canScrollLeft ? { scale: 1.05 } : {}}
               whileTap={canScrollLeft ? { scale: 0.95 } : {}}
             >
-              {canScrollLeft && (
+              {canScrollLeft && !isLowPerf && (
                 <motion.div
                   className="absolute inset-0 bg-gradient-to-r from-akusho-neon/20 to-transparent"
                   animate={{ x: ["-100%", "100%"] }}
@@ -416,7 +419,7 @@ function AnimeSeriesCarousel({ products }: { products: Product[] }) {
               whileHover={canScrollRight ? { scale: 1.05 } : {}}
               whileTap={canScrollRight ? { scale: 0.95 } : {}}
             >
-              {canScrollRight && (
+              {canScrollRight && !isLowPerf && (
                 <motion.div
                   className="absolute inset-0 bg-gradient-to-r from-transparent to-akusho-neon/20"
                   animate={{ x: ["-100%", "100%"] }}
@@ -433,7 +436,7 @@ function AnimeSeriesCarousel({ products }: { products: Product[] }) {
           <div className="absolute left-0 top-0 bottom-0 w-20 bg-gradient-to-r from-gray-50 dark:from-akusho-darker to-transparent z-10 pointer-events-none" />
           <div className="absolute right-0 top-0 bottom-0 w-20 bg-gradient-to-l from-gray-50 dark:from-akusho-darker to-transparent z-10 pointer-events-none" />
 
-          {/* Inject CSS for carousel animation */}
+          {/* CSS animation for carousel - GPU accelerated */}
           <style jsx global>{`
             @keyframes carousel-scroll {
               0% { transform: translateX(0); }
@@ -441,6 +444,7 @@ function AnimeSeriesCarousel({ products }: { products: Product[] }) {
             }
             .carousel-track {
               animation: carousel-scroll 12s linear infinite;
+              will-change: transform;
             }
             .carousel-track:hover {
               animation-play-state: paused;
@@ -452,6 +456,7 @@ function AnimeSeriesCarousel({ products }: { products: Product[] }) {
             .series-card-inner {
               transform: translateZ(0);
               transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+              will-change: transform, box-shadow;
               box-shadow: 
                 0 10px 30px -10px rgba(0, 0, 0, 0.5),
                 0 0 0 1px rgba(255, 255, 255, 0.1);
@@ -490,6 +495,7 @@ function AnimeSeriesCarousel({ products }: { products: Product[] }) {
                             fill
                             className="object-cover"
                             sizes="(max-width: 768px) 176px, 208px"
+                            loading="lazy"
                           />
                         ) : (
                           <div className={`absolute inset-0 bg-gradient-to-br ${style.gradient}`} />
@@ -504,14 +510,16 @@ function AnimeSeriesCarousel({ products }: { products: Product[] }) {
                         {/* Inner shadow for depth */}
                         <div className="absolute inset-0 shadow-[inset_0_2px_20px_rgba(255,255,255,0.1),inset_0_-10px_30px_rgba(0,0,0,0.3)]" />
 
-                        {/* Animated shine sweep */}
-                        <div className="absolute inset-0 overflow-hidden">
-                          <motion.div
-                            className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12"
-                            animate={{ x: ["-200%", "200%"] }}
-                            transition={{ duration: 3, repeat: Infinity, repeatDelay: 2, ease: "easeInOut" }}
-                          />
-                        </div>
+                        {/* Animated shine sweep - only on high-perf */}
+                        {!isLowPerf && (
+                          <div className="absolute inset-0 overflow-hidden">
+                            <motion.div
+                              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12"
+                              animate={{ x: ["-200%", "200%"] }}
+                              transition={{ duration: 3, repeat: Infinity, repeatDelay: 2, ease: "easeInOut" }}
+                            />
+                          </div>
+                        )}
 
                         {/* Border glow */}
                         <div 
@@ -526,7 +534,7 @@ function AnimeSeriesCarousel({ products }: { products: Product[] }) {
                           {isHot && (
                             <motion.div
                               className="absolute top-3 right-3"
-                              animate={{ scale: [1, 1.1, 1] }}
+                              animate={isLowPerf ? {} : { scale: [1, 1.1, 1] }}
                               transition={{ duration: 1.5, repeat: Infinity }}
                             >
                               <div className="px-3 py-1.5 bg-akusho-neon/90 backdrop-blur-sm rounded-full shadow-lg shadow-akusho-neon/30">
@@ -568,23 +576,14 @@ function AnimeSeriesCarousel({ products }: { products: Product[] }) {
   );
 }
 
-// Anime Marquee - Cool infinite scrolling anime style
-function AnimeMarquee({ products }: { products: Product[] }) {
-  // Extract unique series names from products
+// Anime Marquee - Cool infinite scrolling
+function AnimeMarquee({ products, isLowPerf }: { products: Product[]; isLowPerf: boolean }) {
   const seriesNames = useMemo(() => {
     const seriesKeywords: Record<string, string> = {
-      "luffy": "ONE PIECE",
-      "zoro": "ONE PIECE", 
-      "nami": "ONE PIECE",
-      "mihawk": "ONE PIECE",
-      "goku": "DRAGON BALL",
-      "vegeta": "DRAGON BALL",
-      "naruto": "NARUTO",
-      "sasuke": "NARUTO",
-      "itachi": "NARUTO",
-      "kakashi": "NARUTO",
-      "tanjiro": "DEMON SLAYER",
-      "zenitsu": "DEMON SLAYER",
+      "luffy": "ONE PIECE", "zoro": "ONE PIECE", "nami": "ONE PIECE", "mihawk": "ONE PIECE",
+      "goku": "DRAGON BALL", "vegeta": "DRAGON BALL",
+      "naruto": "NARUTO", "sasuke": "NARUTO", "itachi": "NARUTO", "kakashi": "NARUTO",
+      "tanjiro": "DEMON SLAYER", "zenitsu": "DEMON SLAYER",
       "gojo": "JUJUTSU KAISEN",
     };
 
@@ -599,10 +598,7 @@ function AnimeMarquee({ products }: { products: Product[] }) {
       }
     });
 
-    // Convert Set to Array
     const found = Array.from(foundSet);
-
-    // Add some extras to make it look fuller
     const extras = ["ATTACK ON TITAN", "MY HERO ACADEMIA", "BLEACH", "CHAINSAW MAN", "SPY × FAMILY", "TOKYO REVENGERS"];
     extras.forEach(e => {
       if (!found.includes(e) && found.length < 12) found.push(e);
@@ -611,12 +607,10 @@ function AnimeMarquee({ products }: { products: Product[] }) {
     return found.length > 0 ? found : ["ONE PIECE", "NARUTO", "DEMON SLAYER", "JUJUTSU KAISEN", "DRAGON BALL", "ATTACK ON TITAN"];
   }, [products]);
 
-  // Duplicate for seamless loop
   const marqueeItems = [...seriesNames, ...seriesNames, ...seriesNames, ...seriesNames];
 
   return (
     <>
-      {/* Inject CSS keyframes */}
       <style jsx global>{`
         @keyframes marquee-scroll {
           0% { transform: translateX(0); }
@@ -624,6 +618,7 @@ function AnimeMarquee({ products }: { products: Product[] }) {
         }
         .marquee-track {
           animation: marquee-scroll 30s linear infinite;
+          will-change: transform;
         }
         .marquee-track:hover {
           animation-play-state: paused;
@@ -631,32 +626,33 @@ function AnimeMarquee({ products }: { products: Product[] }) {
       `}</style>
 
       <div className="relative py-4 bg-gradient-to-r from-akusho-deepest via-purple-900/20 to-akusho-deepest overflow-hidden border-y border-akusho-neon/30">
-        {/* Animated background glow */}
-        <div className="absolute inset-0 overflow-hidden">
-          <motion.div 
-            className="absolute top-1/2 left-1/4 w-64 h-8 bg-akusho-neon/20 blur-3xl rounded-full"
-            animate={{ x: [0, 200, 0], opacity: [0.3, 0.6, 0.3] }}
-            transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
-          />
-          <motion.div 
-            className="absolute top-1/2 right-1/4 w-64 h-8 bg-purple-500/20 blur-3xl rounded-full"
-            animate={{ x: [0, -200, 0], opacity: [0.3, 0.6, 0.3] }}
-            transition={{ duration: 8, repeat: Infinity, ease: "easeInOut", delay: 2 }}
-          />
-        </div>
+        {/* Animated background glow - only on high-perf */}
+        {!isLowPerf && (
+          <div className="absolute inset-0 overflow-hidden">
+            <motion.div 
+              className="absolute top-1/2 left-1/4 w-64 h-8 bg-akusho-neon/20 blur-3xl rounded-full"
+              animate={{ x: [0, 200, 0], opacity: [0.3, 0.6, 0.3] }}
+              transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+            />
+            <motion.div 
+              className="absolute top-1/2 right-1/4 w-64 h-8 bg-purple-500/20 blur-3xl rounded-full"
+              animate={{ x: [0, -200, 0], opacity: [0.3, 0.6, 0.3] }}
+              transition={{ duration: 8, repeat: Infinity, ease: "easeInOut", delay: 2 }}
+            />
+          </div>
+        )}
 
-        {/* Top glow line */}
+        {/* Glow lines */}
         <motion.div 
           className="absolute inset-x-0 top-0 h-[2px]"
           style={{ background: "linear-gradient(90deg, transparent, #00A8FF, #8B5CF6, #EC4899, #00A8FF, transparent)" }}
-          animate={{ opacity: [0.5, 1, 0.5] }}
+          animate={isLowPerf ? {} : { opacity: [0.5, 1, 0.5] }}
           transition={{ duration: 2, repeat: Infinity }}
         />
-        {/* Bottom glow line */}
         <motion.div 
           className="absolute inset-x-0 bottom-0 h-[2px]"
           style={{ background: "linear-gradient(90deg, transparent, #EC4899, #8B5CF6, #00A8FF, #EC4899, transparent)" }}
-          animate={{ opacity: [0.5, 1, 0.5] }}
+          animate={isLowPerf ? {} : { opacity: [0.5, 1, 0.5] }}
           transition={{ duration: 2, repeat: Infinity, delay: 1 }}
         />
         
@@ -669,7 +665,7 @@ function AnimeMarquee({ products }: { products: Product[] }) {
           {marqueeItems.map((name, index) => (
             <div key={`marquee-${index}`} className="flex items-center mx-4 md:mx-8 group cursor-default">
               <motion.div
-                animate={{ rotate: [0, 180, 360] }}
+                animate={isLowPerf ? {} : { rotate: [0, 180, 360] }}
                 transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
               >
                 <Sparkles className="w-4 h-4 md:w-5 md:h-5 text-akusho-neon mr-2 md:mr-3" />
@@ -686,8 +682,8 @@ function AnimeMarquee({ products }: { products: Product[] }) {
   );
 }
 
-// Flash Sale Section - Dynamic with real products
-function FlashSaleSection({ products }: { products: Product[] }) {
+// Flash Sale Section
+function FlashSaleSection({ products, isLowPerf }: { products: Product[]; isLowPerf: boolean }) {
   const [timeLeft, setTimeLeft] = useState({ hours: 23, minutes: 59, seconds: 59 });
 
   useEffect(() => {
@@ -696,7 +692,7 @@ function FlashSaleSection({ products }: { products: Product[] }) {
         if (prev.seconds > 0) return { ...prev, seconds: prev.seconds - 1 };
         if (prev.minutes > 0) return { ...prev, minutes: prev.minutes - 1, seconds: 59 };
         if (prev.hours > 0) return { hours: prev.hours - 1, minutes: 59, seconds: 59 };
-        return { hours: 23, minutes: 59, seconds: 59 }; // Reset
+        return { hours: 23, minutes: 59, seconds: 59 };
       });
     }, 1000);
     return () => clearInterval(timer);
@@ -707,7 +703,7 @@ function FlashSaleSection({ products }: { products: Product[] }) {
       <div className="absolute inset-0 overflow-hidden">
         <motion.div
           className="absolute top-0 left-0 w-[500px] h-[500px] bg-red-500/10 rounded-full blur-3xl"
-          animate={{ x: [0, 100, 0], y: [0, 50, 0] }}
+          animate={isLowPerf ? {} : { x: [0, 100, 0], y: [0, 50, 0] }}
           transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
         />
       </div>
@@ -722,7 +718,10 @@ function FlashSaleSection({ products }: { products: Product[] }) {
               viewport={{ once: true }}
               className="flex items-center justify-center md:justify-start gap-3 mb-3"
             >
-              <motion.div animate={{ rotate: [0, 10, -10, 0] }} transition={{ duration: 0.5, repeat: Infinity, repeatDelay: 2 }}>
+              <motion.div 
+                animate={isLowPerf ? {} : { rotate: [0, 10, -10, 0] }} 
+                transition={{ duration: 0.5, repeat: Infinity, repeatDelay: 2 }}
+              >
                 <Zap className="w-8 h-8 text-yellow-400 fill-yellow-400" />
               </motion.div>
               <span className="text-red-500 font-bold text-lg uppercase tracking-wider">Flash Sale</span>
@@ -733,7 +732,12 @@ function FlashSaleSection({ products }: { products: Product[] }) {
           </div>
 
           {/* Countdown Timer */}
-          <motion.div initial={{ opacity: 0, scale: 0.9 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true }} className="flex items-center gap-3">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }} 
+            whileInView={{ opacity: 1, scale: 1 }} 
+            viewport={{ once: true }} 
+            className="flex items-center gap-3"
+          >
             <span className="text-gray-400 text-sm uppercase tracking-wider hidden sm:block">Ends in:</span>
             <div className="flex gap-2">
               {[
@@ -774,7 +778,6 @@ function FlashSaleSection({ products }: { products: Product[] }) {
               >
                 <Link href={`/product/${product.id}`}>
                   <div className="relative bg-akusho-dark rounded-2xl overflow-hidden border border-red-500/20 hover:border-red-500/50 transition-all duration-300">
-                    {/* Discount Badge */}
                     {discount > 0 && (
                       <div className="absolute top-3 left-3 z-10">
                         <div className="px-3 py-1 bg-red-500 rounded-full">
@@ -783,7 +786,6 @@ function FlashSaleSection({ products }: { products: Product[] }) {
                       </div>
                     )}
 
-                    {/* Image */}
                     <div className="relative aspect-square bg-akusho-darker">
                       {imageUrl ? (
                         <Image
@@ -792,6 +794,7 @@ function FlashSaleSection({ products }: { products: Product[] }) {
                           fill
                           className="object-cover group-hover:scale-105 transition-transform duration-300"
                           sizes="(max-width: 768px) 50vw, 25vw"
+                          loading="lazy"
                         />
                       ) : (
                         <div className="absolute inset-0 bg-gradient-to-br from-red-500/10 to-orange-500/10 flex items-center justify-center">
@@ -800,7 +803,6 @@ function FlashSaleSection({ products }: { products: Product[] }) {
                       )}
                     </div>
 
-                    {/* Info */}
                     <div className="p-4">
                       <p className="text-xs text-red-400 uppercase tracking-wider mb-1">{product.category || "Uncategorized"}</p>
                       <h3 className="font-heading text-white text-sm md:text-base line-clamp-2 mb-2 group-hover:text-red-400 transition-colors">
@@ -820,7 +822,6 @@ function FlashSaleSection({ products }: { products: Product[] }) {
           })}
         </div>
 
-        {/* View All Button */}
         <div className="text-center mt-10">
           <Button href="/shop?sale=true" variant="outline" className="border-red-500 text-red-500 hover:bg-red-500 hover:text-white">
             View All Deals
@@ -832,8 +833,8 @@ function FlashSaleSection({ products }: { products: Product[] }) {
   );
 }
 
-// Featured Product Spotlight - THE ONE product (Original beautiful design)
-function FeaturedSpotlight({ product }: { product: Product }) {
+// Featured Product Spotlight
+function FeaturedSpotlight({ product, isLowPerf }: { product: Product; isLowPerf: boolean }) {
   const { addToCart } = useCart();
   const stock = product.stock || 12;
   const discount = product.compare_price
@@ -884,7 +885,7 @@ function FeaturedSpotlight({ product }: { product: Product }) {
                 background: "conic-gradient(from 0deg, #00A8FF, #8B5CF6, #EC4899, #00A8FF)",
                 padding: "3px",
               }}
-              animate={{ rotate: 360 }}
+              animate={isLowPerf ? {} : { rotate: 360 }}
               transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
             >
               <div className="w-full h-full bg-akusho-deepest rounded-3xl" />
@@ -898,7 +899,8 @@ function FeaturedSpotlight({ product }: { product: Product }) {
                   alt={product.name} 
                   fill 
                   className="object-cover" 
-                  sizes="(max-width: 768px) 100vw, 50vw" 
+                  sizes="(max-width: 768px) 100vw, 50vw"
+                  priority
                 />
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center">
@@ -910,7 +912,7 @@ function FeaturedSpotlight({ product }: { product: Product }) {
               <div className="absolute top-4 left-4">
                 <motion.div
                   className="px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full"
-                  animate={{ scale: [1, 1.05, 1] }}
+                  animate={isLowPerf ? {} : { scale: [1, 1.05, 1] }}
                   transition={{ duration: 2, repeat: Infinity }}
                 >
                   <span className="text-white text-sm font-bold uppercase tracking-wider flex items-center gap-2">
@@ -928,7 +930,6 @@ function FeaturedSpotlight({ product }: { product: Product }) {
             whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true }}
           >
-            {/* Category & Discount Badges */}
             <div className="flex items-center gap-2 mb-4">
               <span className="px-3 py-1 bg-akusho-neon/20 rounded-full text-akusho-neon text-xs font-semibold uppercase tracking-wider">
                 {product.category || "Featured"}
@@ -940,12 +941,10 @@ function FeaturedSpotlight({ product }: { product: Product }) {
               )}
             </div>
 
-            {/* Product Name */}
             <h2 className="font-heading text-3xl md:text-4xl lg:text-5xl text-white mb-4 leading-tight">
               {product.name}
             </h2>
 
-            {/* Description */}
             <p className="text-gray-400 text-lg mb-6">
               {product.description || "Limited edition 1/7 scale figure featuring iconic technique. Premium PVC with LED base."}
             </p>
@@ -1000,7 +999,7 @@ function FeaturedSpotlight({ product }: { product: Product }) {
               </motion.button>
             </div>
 
-            {/* Product Specs - Scale, Height, LED Base */}
+            {/* Product Specs */}
             <div className="grid grid-cols-3 gap-4 mt-8 pt-8 border-t border-akusho-neon/20">
               <div className="text-center">
                 <p className="text-akusho-neon font-heading text-xl">1/7</p>
@@ -1022,7 +1021,7 @@ function FeaturedSpotlight({ product }: { product: Product }) {
   );
 }
 
-// Stats Section - Dynamic
+// Stats Section
 function StatsSection({ productCount }: { productCount: number }) {
   const stats = [
     { value: 50000, suffix: "+", label: "Figures Sold", icon: Package },
@@ -1111,8 +1110,6 @@ function CountUp({ end, suffix = "" }: { end: number; suffix?: string }) {
     </span>
   );
 }
-
-
 
 // Live Purchase Notifications
 function LivePurchaseNotification({ purchases }: { purchases: { name: string; city: string; product: string; time: string }[] }) {
@@ -1216,7 +1213,7 @@ function TrustBadges() {
 }
 
 // Coming Soon - Anime Katanas Section
-function ComingSoonKatanas() {
+function ComingSoonKatanas({ isLowPerf }: { isLowPerf: boolean }) {
   const katanas = [
     { name: "Zoro's Enma", series: "One Piece", color: "from-purple-600 to-violet-500", image: "/katanas/enma.jpg" },
     { name: "Zoro's Wado Ichimonji", series: "One Piece", color: "from-gray-100 to-gray-300", image: "/katanas/wado-ichimonji.jpg" },
@@ -1228,13 +1225,11 @@ function ComingSoonKatanas() {
 
   return (
     <section className="relative py-20 bg-gradient-to-br from-akusho-deepest via-purple-900/20 to-akusho-deepest overflow-hidden">
-      {/* Background Effects */}
       <div className="absolute inset-0">
         <div className="absolute top-1/2 left-0 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl" />
         <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-akusho-neon/10 rounded-full blur-3xl" />
       </div>
 
-      {/* Animated Grid Pattern */}
       <div
         className="absolute inset-0 opacity-5"
         style={{
@@ -1244,7 +1239,6 @@ function ComingSoonKatanas() {
       />
 
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header */}
         <div className="text-center mb-12">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -1253,7 +1247,7 @@ function ComingSoonKatanas() {
             className="inline-flex items-center gap-2 px-4 py-2 bg-akusho-neon/10 border border-akusho-neon/30 rounded-full mb-4"
           >
             <motion.div
-              animate={{ rotate: [0, 10, -10, 0] }}
+              animate={isLowPerf ? {} : { rotate: [0, 10, -10, 0] }}
               transition={{ duration: 2, repeat: Infinity }}
             >
               <Sparkles className="w-4 h-4 text-akusho-neon" />
@@ -1282,7 +1276,6 @@ function ComingSoonKatanas() {
           </motion.p>
         </div>
 
-        {/* Katanas Grid */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 md:gap-6">
           {katanas.map((katana, index) => (
             <motion.div
@@ -1294,7 +1287,6 @@ function ComingSoonKatanas() {
               className="group relative"
             >
               <div className="relative aspect-[2/3] rounded-2xl overflow-hidden bg-akusho-dark border border-purple-500/20 hover:border-akusho-neon/50 transition-all duration-300 hover:scale-105 hover:shadow-[0_0_30px_rgba(0,168,255,0.3)]">
-                {/* Image or Gradient Background */}
                 {katana.image ? (
                   <Image
                     src={katana.image}
@@ -1302,64 +1294,58 @@ function ComingSoonKatanas() {
                     fill
                     className="object-cover group-hover:scale-110 transition-transform duration-500"
                     sizes="(max-width: 768px) 50vw, 16vw"
+                    loading="lazy"
                   />
                 ) : (
                   <div className={`absolute inset-0 bg-gradient-to-br ${katana.color} opacity-30 group-hover:opacity-50 transition-opacity`} />
                 )}
                 
-                {/* Dark overlay for text */}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent" />
                 
-                {/* Katana Silhouette Effect (fallback when no image) */}
                 {!katana.image && (
                   <div className="absolute inset-0 flex items-center justify-center">
                     <motion.div
                       className="w-2 h-32 bg-gradient-to-b from-gray-300 via-gray-400 to-gray-600 rounded-full opacity-20 group-hover:opacity-40"
                       style={{ transform: "rotate(-30deg)" }}
-                      animate={{ opacity: [0.2, 0.4, 0.2] }}
+                      animate={isLowPerf ? {} : { opacity: [0.2, 0.4, 0.2] }}
                       transition={{ duration: 2, repeat: Infinity }}
                     />
                   </div>
                 )}
 
-                {/* Coming Soon Badge */}
                 <div className="absolute top-3 left-3 z-10">
                   <motion.div 
                     className="px-2 py-1 bg-akusho-neon/20 backdrop-blur-sm rounded-full border border-akusho-neon/30"
-                    animate={{ scale: [1, 1.05, 1] }}
+                    animate={isLowPerf ? {} : { scale: [1, 1.05, 1] }}
                     transition={{ duration: 2, repeat: Infinity }}
                   >
                     <span className="text-[10px] font-bold text-akusho-neon uppercase tracking-wider">Soon</span>
                   </motion.div>
                 </div>
 
-                {/* Content */}
                 <div className="absolute inset-0 flex flex-col justify-end p-3 z-10">
                   <p className="text-akusho-neon/70 text-[10px] uppercase tracking-wider mb-1">{katana.series}</p>
                   <h3 className="font-heading text-white text-sm leading-tight drop-shadow-lg">{katana.name}</h3>
                 </div>
 
-                {/* Hover Glow */}
                 <div
                   className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none rounded-2xl"
-                  style={{
-                    boxShadow: "inset 0 0 30px rgba(0, 168, 255, 0.3)",
-                  }}
+                  style={{ boxShadow: "inset 0 0 30px rgba(0, 168, 255, 0.3)" }}
                 />
                 
-                {/* Shine sweep on hover */}
-                <motion.div
-                  className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12 opacity-0 group-hover:opacity-100"
-                  initial={{ x: "-200%" }}
-                  whileHover={{ x: "200%" }}
-                  transition={{ duration: 0.6 }}
-                />
+                {!isLowPerf && (
+                  <motion.div
+                    className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12 opacity-0 group-hover:opacity-100"
+                    initial={{ x: "-200%" }}
+                    whileHover={{ x: "200%" }}
+                    transition={{ duration: 0.6 }}
+                  />
+                )}
               </div>
             </motion.div>
           ))}
         </div>
 
-        {/* Notify Me Button */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
@@ -1436,7 +1422,7 @@ function TestimonialsSection() {
 }
 
 // Newsletter
-function NewsletterSection() {
+function NewsletterSection({ isLowPerf }: { isLowPerf: boolean }) {
   const [email, setEmail] = useState("");
 
   return (
@@ -1444,7 +1430,7 @@ function NewsletterSection() {
       <div className="absolute inset-0">
         <motion.div
           className="absolute top-0 left-1/4 w-96 h-96 bg-akusho-neon/20 rounded-full blur-3xl"
-          animate={{ y: [0, -50, 0], scale: [1, 1.1, 1] }}
+          animate={isLowPerf ? {} : { y: [0, -50, 0], scale: [1, 1.1, 1] }}
           transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
         />
       </div>
@@ -1490,7 +1476,7 @@ function NewsletterSection() {
 }
 
 // CTA Section
-function CTASection() {
+function CTASection({ isLowPerf }: { isLowPerf: boolean }) {
   return (
     <section className="relative py-20 overflow-hidden">
       <div className="absolute inset-0 bg-gradient-to-r from-purple-700 via-purple-600 to-akusho-neon" />
@@ -1501,7 +1487,7 @@ function CTASection() {
             key={i}
             className="absolute w-64 h-64 border border-white/10 rounded-full"
             style={{ left: `${20 + i * 15}%`, top: `${10 + i * 10}%` }}
-            animate={{ scale: [1, 1.2, 1], opacity: [0.1, 0.3, 0.1] }}
+            animate={isLowPerf ? {} : { scale: [1, 1.2, 1], opacity: [0.1, 0.3, 0.1] }}
             transition={{ duration: 4 + i, repeat: Infinity, ease: "easeInOut" }}
           />
         ))}
