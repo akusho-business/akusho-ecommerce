@@ -1,4 +1,8 @@
-// app/api/checkout/verify/route.ts
+// ============================================
+// FILE: app/api/checkout/verify/route.ts
+// PURPOSE: Verify Razorpay payment and update order status
+// ============================================
+
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
@@ -41,6 +45,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Update order in database
+    // STATUS FLOW: pending → processing (after payment verified)
     const { data: order, error: updateError } = await supabase
       .from("orders")
       .update({
@@ -48,6 +53,7 @@ export async function POST(request: NextRequest) {
         status: "processing",
         razorpay_payment_id,
         razorpay_signature,
+        paid_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
       .eq("id", orderId)
@@ -62,23 +68,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Parse shipping address
-    let shippingAddress = order.shipping_address;
-    if (typeof shippingAddress === "string") {
-      try {
-        shippingAddress = JSON.parse(shippingAddress);
-      } catch {
-        shippingAddress = {
-          line1: shippingAddress,
-          city: "",
-          state: "",
-          pincode: "",
-          country: "India",
-        };
-      }
-    }
-
-    // Parse items
+    // Parse items if stored as string
     let items = order.items;
     if (typeof items === "string") {
       try {
@@ -87,6 +77,17 @@ export async function POST(request: NextRequest) {
         items = [];
       }
     }
+
+    // Build shipping address object for email
+    // FIXED: Using 'line1' instead of 'address' to match resend.ts types
+    const shippingAddress = {
+      line1: order.shipping_address || "",
+      line2: "",
+      city: order.shipping_city || "",
+      state: order.shipping_state || "",
+      pincode: order.shipping_pincode || "",
+      country: order.shipping_country || "India",
+    };
 
     // Send order confirmation email to customer
     try {
@@ -98,21 +99,20 @@ export async function POST(request: NextRequest) {
           name: item.name,
           quantity: item.quantity,
           price: item.price,
-          image: item.image,
+          image: item.image || item.image_url,
         })),
         subtotal: order.subtotal,
-        shipping: order.shipping || 0,
+        shipping: order.shipping_cost || order.shipping || 0,
         discount: order.discount || 0,
-        total: order.total,
+        total: order.total || order.total_amount,
         shippingAddress,
       });
-      console.log("Order confirmation email sent for:", order.order_number);
+      console.log("✅ Order confirmation email sent:", order.order_number);
     } catch (emailError) {
-      // Log but don't fail the request if email fails
-      console.error("Failed to send confirmation email:", emailError);
+      console.error("❌ Failed to send confirmation email:", emailError);
     }
 
-    // Send notification to admin (business.akusho@gmail.com)
+    // Send notification to admin
     try {
       await sendAdminOrderNotification({
         orderNumber: order.order_number,
@@ -123,18 +123,18 @@ export async function POST(request: NextRequest) {
           name: item.name,
           quantity: item.quantity,
           price: item.price,
-          image: item.image,
+          image: item.image || item.image_url,
         })),
         subtotal: order.subtotal,
-        shipping: order.shipping || 0,
+        shipping: order.shipping_cost || order.shipping || 0,
         discount: order.discount || 0,
-        total: order.total,
+        total: order.total || order.total_amount,
         shippingAddress,
         razorpayPaymentId: razorpay_payment_id,
       });
-      console.log("Admin notification sent for:", order.order_number);
+      console.log("✅ Admin notification sent:", order.order_number);
     } catch (adminEmailError) {
-      console.error("Failed to send admin notification:", adminEmailError);
+      console.error("❌ Failed to send admin notification:", adminEmailError);
     }
 
     return NextResponse.json({

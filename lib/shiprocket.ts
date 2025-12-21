@@ -1,5 +1,6 @@
 // lib/shiprocket.ts
-// Shiprocket API Integration for AKUSHO
+// ENHANCED Shiprocket API Integration for AKUSHO
+// Includes: Order workflow, RTD automation, webhook handling
 
 const BASE_URL = "https://apiv2.shiprocket.in/v1/external";
 
@@ -494,10 +495,14 @@ export async function getOrder(orderId: number): Promise<any> {
   return apiRequest(`/orders/show/${orderId}`);
 }
 
+// ============================================
+// STATUS MAPPING
+// ============================================
+
 /**
- * Map Shiprocket status ID to readable status
+ * Shiprocket status ID to label mapping
  */
-export const STATUS_MAP: Record<number, string> = {
+export const SHIPROCKET_STATUS_MAP: Record<number, string> = {
   1: "awb_assigned",
   2: "label_generated",
   3: "pickup_scheduled",
@@ -518,28 +523,302 @@ export const STATUS_MAP: Record<number, string> = {
 };
 
 /**
- * Map Shiprocket status to your order status
+ * Map Shiprocket status to AKUSHO order status
  */
-export function mapToOrderStatus(shiprocketStatusId: number): string {
+export function mapShiprocketToOrderStatus(shiprocketStatusId: number): string {
   const statusMapping: Record<number, string> = {
-    1: "processing",
-    2: "processing",
-    3: "processing",
-    4: "processing",
-    5: "processing",
-    6: "shipped",
-    7: "delivered",
-    8: "cancelled",
-    9: "cancelled",
-    10: "cancelled",
-    17: "shipped",
-    18: "shipped",
-    19: "processing",
-    20: "processing",
-    21: "cancelled",
-    38: "shipped",
-    42: "shipped",
+    1: "processing",      // AWB Assigned
+    2: "processing",      // Label Generated  
+    3: "processing",      // Pickup Scheduled
+    4: "processing",      // Pickup Queued
+    5: "processing",      // Manifest Generated
+    6: "shipped",         // Shipped
+    7: "delivered",       // Delivered
+    8: "cancelled",       // Cancelled
+    9: "rto_initiated",   // RTO Initiated
+    10: "rto_delivered",  // RTO Delivered
+    17: "out_for_delivery", // Out for Delivery
+    18: "shipped",        // In Transit
+    19: "processing",     // Out for Pickup
+    20: "processing",     // Pickup Exception
+    21: "undelivered",    // Undelivered
+    38: "shipped",        // Reached Destination
+    42: "shipped",        // Picked Up
   };
 
   return statusMapping[shiprocketStatusId] || "processing";
 }
+
+/**
+ * Get human-readable status label
+ */
+export function getStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    pending: "Pending Payment",
+    pending_review: "Awaiting Review",
+    confirmed: "Order Confirmed",
+    processing: "Processing",
+    ready_to_dispatch: "Ready to Dispatch",
+    shipped: "Shipped",
+    in_transit: "In Transit",
+    out_for_delivery: "Out for Delivery",
+    delivered: "Delivered",
+    cancelled: "Cancelled",
+    rto_initiated: "Return Initiated",
+    rto_delivered: "Returned to Seller",
+    undelivered: "Delivery Failed",
+  };
+
+  return labels[status] || status.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// ============================================
+// READY TO DISPATCH (RTD) WORKFLOW
+// ============================================
+
+export interface RTDResult {
+  success: boolean;
+  shiprocketOrderId?: number;
+  shipmentId?: number;
+  awbCode?: string;
+  courierName?: string;
+  labelUrl?: string;
+  trackingUrl?: string;
+  expectedDelivery?: string;
+  error?: string;
+}
+
+/**
+ * Complete Ready to Dispatch flow:
+ * 1. Create order in Shiprocket
+ * 2. Assign AWB (auto-select courier)
+ * 3. Schedule pickup
+ * 4. Generate label
+ * 
+ * @param order - Order data from your database
+ * @returns RTDResult with all shipping details
+ */
+export async function processReadyToDispatch(order: {
+  id: number;
+  order_number: string;
+  customer_name: string;
+  customer_email: string;
+  customer_phone: string;
+  shipping_address: string;
+  shipping_city: string;
+  shipping_state: string;
+  shipping_pincode: string;
+  items: Array<{
+    id: number;
+    name: string;
+    quantity: number;
+    price: number;
+    sku?: string;
+  }>;
+  subtotal: number;
+  total: number;
+  payment_status: string;
+}): Promise<RTDResult> {
+  console.log(`🚀 Starting RTD process for order ${order.order_number}`);
+  
+  try {
+    // 1. Create order in Shiprocket
+    console.log("Step 1: Creating Shiprocket order...");
+    
+    const orderItems: ShiprocketOrderItem[] = order.items.map((item) => ({
+      name: item.name,
+      sku: item.sku || `SKU-${item.id}`,
+      units: item.quantity,
+      selling_price: item.price,
+    }));
+
+    // Parse shipping address
+    const addressParts = order.shipping_address.split(",").map(s => s.trim());
+    const addressLine1 = addressParts[0] || order.shipping_address;
+    const addressLine2 = addressParts.slice(1).join(", ");
+
+    // Parse customer name
+    const nameParts = order.customer_name.trim().split(" ");
+    const firstName = nameParts[0];
+    const lastName = nameParts.slice(1).join(" ") || "";
+
+    const shiprocketOrderData: CreateOrderParams = {
+      order_id: order.order_number,
+      order_date: new Date().toISOString().split("T")[0],
+      pickup_location: process.env.SHIPROCKET_PICKUP_LOCATION || "Primary",
+      billing_customer_name: firstName,
+      billing_last_name: lastName,
+      billing_address: addressLine1,
+      billing_address_2: addressLine2,
+      billing_city: order.shipping_city || "Unknown",
+      billing_pincode: order.shipping_pincode || "000000",
+      billing_state: order.shipping_state || "Unknown",
+      billing_country: "India",
+      billing_email: order.customer_email,
+      billing_phone: order.customer_phone.replace(/\D/g, "").slice(-10),
+      shipping_is_billing: true,
+      order_items: orderItems,
+      payment_method: order.payment_status === "paid" ? "Prepaid" : "COD",
+      sub_total: order.subtotal,
+      length: 20, // Default dimensions - adjust based on your products
+      breadth: 15,
+      height: 10,
+      weight: 0.5, // Default weight in kg
+    };
+
+    const shiprocketOrder = await createOrder(shiprocketOrderData);
+    console.log("✅ Shiprocket order created:", shiprocketOrder.order_id);
+
+    // 2. Assign AWB (auto-select best courier)
+    console.log("Step 2: Assigning AWB...");
+    const awbResult = await assignAWB(shiprocketOrder.shipment_id);
+    
+    if (awbResult.awb_assign_status !== 1) {
+      throw new Error("Failed to assign AWB - courier may not be available");
+    }
+    
+    const awbCode = awbResult.response.data.awb_code;
+    const courierName = awbResult.response.data.courier_name;
+    console.log(`✅ AWB assigned: ${awbCode} (${courierName})`);
+
+    // 3. Schedule pickup
+    console.log("Step 3: Scheduling pickup...");
+    await schedulePickup([shiprocketOrder.shipment_id]);
+    console.log("✅ Pickup scheduled");
+
+    // 4. Generate label
+    console.log("Step 4: Generating label...");
+    const labelResult = await generateLabel([shiprocketOrder.shipment_id]);
+    const labelUrl = labelResult.label_url || null;
+    console.log("✅ Label generated:", labelUrl);
+
+    // 5. Get tracking info
+    let trackingUrl: string | undefined = undefined;
+    let expectedDelivery: string | undefined = undefined;
+    
+    try {
+      const trackingData = await trackByAWB(awbCode);
+      trackingUrl = trackingData.tracking_data?.track_url || undefined;
+      expectedDelivery = trackingData.tracking_data?.etd || undefined;
+    } catch (e) {
+      console.log("Tracking URL not available yet");
+    }
+
+    console.log(`✅ RTD complete for order ${order.order_number}`);
+
+    return {
+      success: true,
+      shiprocketOrderId: shiprocketOrder.order_id,
+      shipmentId: shiprocketOrder.shipment_id,
+      awbCode,
+      courierName,
+      labelUrl: labelUrl || undefined,
+      trackingUrl,
+      expectedDelivery,
+    };
+  } catch (error: any) {
+    console.error("❌ RTD process failed:", error);
+    return {
+      success: false,
+      error: error.message || "Failed to process RTD",
+    };
+  }
+}
+
+// ============================================
+// WEBHOOK PROCESSING
+// ============================================
+
+export interface ShiprocketWebhookPayload {
+  awb: string;
+  courier_name: string;
+  current_status: string;
+  current_status_id: number;
+  shipment_status: string;
+  shipment_status_id: number;
+  current_timestamp: string;
+  order_id: string; // Your order_number + Shiprocket suffix
+  sr_order_id: number;
+  awb_assigned_date: string;
+  pickup_scheduled_date: string;
+  etd: string;
+  scans: Array<{
+    date: string;
+    status: string;
+    activity: string;
+    location: string;
+    "sr-status": string;
+    "sr-status-label": string;
+  }>;
+  is_return: number;
+  channel_id: number;
+  pod_status: string;
+  pod: string;
+}
+
+/**
+ * Process Shiprocket webhook payload
+ * Returns the mapped order status and tracking info
+ */
+export function processWebhookPayload(payload: ShiprocketWebhookPayload): {
+  orderNumber: string;
+  status: string;
+  statusLabel: string;
+  awbCode: string;
+  courierName: string;
+  currentActivity: string;
+  location: string;
+  timestamp: string;
+  expectedDelivery: string | null;
+  isReturn: boolean;
+} {
+  // Extract order number (remove Shiprocket suffix like "_123456")
+  const orderNumber = payload.order_id.split("_")[0];
+  
+  // Map status
+  const status = mapShiprocketToOrderStatus(payload.current_status_id);
+  const statusLabel = getStatusLabel(status);
+  
+  // Get latest scan info
+  const latestScan = payload.scans?.[payload.scans.length - 1];
+  
+  return {
+    orderNumber,
+    status,
+    statusLabel,
+    awbCode: payload.awb,
+    courierName: payload.courier_name,
+    currentActivity: latestScan?.activity || payload.current_status,
+    location: latestScan?.location || "",
+    timestamp: payload.current_timestamp,
+    expectedDelivery: payload.etd || null,
+    isReturn: payload.is_return === 1,
+  };
+}
+
+export default {
+  getAuthToken,
+  checkServiceability,
+  getShippingRates,
+  createOrder,
+  cancelOrder,
+  cancelShipment,
+  assignAWB,
+  schedulePickup,
+  generateLabel,
+  generateManifest,
+  printManifest,
+  printInvoice,
+  trackByAWB,
+  trackByShiprocketOrderId,
+  trackByChannelOrderId,
+  getPickupLocations,
+  addPickupLocation,
+  getOrders,
+  getOrder,
+  processReadyToDispatch,
+  processWebhookPayload,
+  mapShiprocketToOrderStatus,
+  getStatusLabel,
+  SHIPROCKET_STATUS_MAP,
+};

@@ -1,182 +1,169 @@
-// app/api/shipping/track/route.ts
-// Track shipment by AWB code or order number
+// ============================================
+// FILE: app/api/shipping/track/route.ts
+// PURPOSE: Fetch live tracking from Shiprocket
+// ============================================
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { trackByAWB, trackByChannelOrderId } from "@/lib/shiprocket";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+// Shiprocket API base URL
+const SHIPROCKET_API = "https://apiv2.shiprocket.in/v1/external";
 
-export async function GET(req: NextRequest) {
+// Token cache
+let tokenCache: { token: string; expiry: number } | null = null;
+
+async function getShiprocketToken(): Promise<string> {
+  // Return cached token if still valid
+  if (tokenCache && Date.now() < tokenCache.expiry) {
+    return tokenCache.token;
+  }
+
+  const response = await fetch(`${SHIPROCKET_API}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email: process.env.SHIPROCKET_EMAIL,
+      password: process.env.SHIPROCKET_PASSWORD,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to authenticate with Shiprocket");
+  }
+
+  const data = await response.json();
+  
+  // Cache token for 9 days (Shiprocket tokens last 10 days)
+  tokenCache = {
+    token: data.token,
+    expiry: Date.now() + 9 * 24 * 60 * 60 * 1000,
+  };
+
+  return data.token;
+}
+
+export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
+    const { searchParams } = new URL(request.url);
     const awb = searchParams.get("awb");
-    const orderNumber = searchParams.get("orderNumber");
+    const orderId = searchParams.get("order_id");
 
-    if (!awb && !orderNumber) {
+    if (!awb && !orderId) {
       return NextResponse.json(
-        { error: "AWB code or order number required" },
+        { status: "error", message: "AWB or Order ID required" },
         { status: 400 }
       );
     }
 
-    let trackingData: any;
+    const token = await getShiprocketToken();
+
+    let trackingData;
 
     if (awb) {
-      // Track by AWB code
-      trackingData = await trackByAWB(awb);
-    } else if (orderNumber) {
-      // First, get AWB from our database
-      const { data: order } = await supabase
-        .from("orders")
-        .select("awb_code, shiprocket_order_id, status, courier_name, expected_delivery")
-        .eq("order_number", orderNumber)
-        .single();
+      // Track by AWB
+      const response = await fetch(
+        `${SHIPROCKET_API}/courier/track/awb/${awb}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
 
-      if (order?.awb_code) {
-        trackingData = await trackByAWB(order.awb_code);
-      } else if (order?.shiprocket_order_id) {
-        trackingData = await trackByChannelOrderId(orderNumber);
-      } else {
-        // No shipment created yet
-        return NextResponse.json({
-          success: true,
-          status: order?.status || "pending",
-          message: "Shipment not yet created. Your order is being processed.",
-          tracking: null,
-        });
+      if (!response.ok) {
+        throw new Error("Failed to fetch tracking");
       }
+
+      const data = await response.json();
+      trackingData = data.tracking_data;
+    } else if (orderId) {
+      // Track by Shiprocket Order ID
+      const response = await fetch(
+        `${SHIPROCKET_API}/courier/track?order_id=${orderId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch tracking");
+      }
+
+      const data = await response.json();
+      trackingData = data[0]?.tracking_data;
     }
 
-    if (!trackingData || !trackingData.tracking_data) {
+    if (!trackingData) {
       return NextResponse.json({
-        success: true,
-        status: "processing",
-        message: "Tracking information not available yet",
-        tracking: null,
+        status: "pending",
+        message: "Tracking information not yet available",
+        activities: [],
       });
     }
 
-    // Format tracking response
-    const tracking = trackingData.tracking_data;
-    const shipmentTrack = tracking.shipment_track?.[0];
-    const activities = tracking.shipment_track_activities || [];
+    // Parse and format tracking data
+    const shipmentTrack = trackingData.shipment_track || [];
+    const shipmentStatus = trackingData.shipment_status || {};
 
-    // Format activities for display
-    const formattedActivities = activities.map((activity: any) => ({
-      date: activity.date,
-      status: activity.sr_status_label || activity.status,
-      activity: activity.activity,
-      location: activity.location,
+    // Format activities
+    const activities = shipmentTrack.map((event: any) => ({
+      date: event.date,
+      status: event.status,
+      activity: event.activity,
+      location: event.location || event["sr-status-label"] || "",
     }));
 
-    return NextResponse.json({
-      success: true,
-      status: shipmentTrack?.current_status || "in_transit",
-      awb: shipmentTrack?.awb_code || awb,
-      courier: shipmentTrack?.courier_company_id,
-      estimatedDelivery: tracking.etd,
-      trackingUrl: tracking.track_url,
-      currentStatus: {
-        status: shipmentTrack?.current_status,
-        destination: shipmentTrack?.destination,
-        origin: shipmentTrack?.origin,
-        pickupDate: shipmentTrack?.pickup_date,
-        deliveredDate: shipmentTrack?.delivered_date,
-      },
-      activities: formattedActivities,
-      raw: trackingData, // Include raw data for debugging
-    });
+    // Get estimated delivery
+    let estimatedDelivery = null;
+    if (trackingData.etd) {
+      estimatedDelivery = trackingData.etd;
+    } else if (trackingData.edd) {
+      estimatedDelivery = trackingData.edd;
+    }
 
-  } catch (error: any) {
+    // Build tracking URL
+    const courierName = trackingData.courier_name?.toLowerCase() || "";
+    let trackingUrl = null;
+    
+    if (courierName.includes("delhivery")) {
+      trackingUrl = `https://www.delhivery.com/track/package/${awb}`;
+    } else if (courierName.includes("bluedart")) {
+      trackingUrl = `https://www.bluedart.com/tracking/${awb}`;
+    } else if (courierName.includes("ecom")) {
+      trackingUrl = `https://ecomexpress.in/tracking/?awb_field=${awb}`;
+    } else if (courierName.includes("xpressbees")) {
+      trackingUrl = `https://www.xpressbees.com/track?awb=${awb}`;
+    } else if (courierName.includes("shadowfax")) {
+      trackingUrl = `https://tracker.shadowfax.in/#/track/${awb}`;
+    } else if (courierName.includes("dtdc")) {
+      trackingUrl = `https://www.dtdc.in/tracking.asp?strCnno=${awb}`;
+    }
+
+    return NextResponse.json({
+      status: shipmentStatus.status || trackingData.current_status || "in_transit",
+      awb: awb || trackingData.awb_code,
+      courier: trackingData.courier_name || "Courier",
+      estimatedDelivery,
+      trackingUrl,
+      activities,
+      currentStatus: {
+        status: trackingData.current_status,
+        statusId: trackingData.current_status_id,
+        location: shipmentTrack[0]?.location || "",
+        timestamp: shipmentTrack[0]?.date || "",
+      },
+    });
+  } catch (error) {
     console.error("Tracking error:", error);
     return NextResponse.json(
       { 
-        error: "Failed to fetch tracking information",
-        message: error.message,
+        status: "error", 
+        message: "Unable to fetch tracking information",
+        activities: []
       },
-      { status: 500 }
-    );
-  }
-}
-
-// POST method for tracking multiple AWBs
-export async function POST(req: NextRequest) {
-  try {
-    const { awbs, orderNumbers } = await req.json();
-
-    if (!awbs && !orderNumbers) {
-      return NextResponse.json(
-        { error: "AWB codes or order numbers required" },
-        { status: 400 }
-      );
-    }
-
-    const trackingResults: Record<string, any> = {};
-
-    // Track by AWBs
-    if (awbs && Array.isArray(awbs)) {
-      for (const awb of awbs.slice(0, 10)) { // Limit to 10
-        try {
-          const tracking = await trackByAWB(awb);
-          trackingResults[awb] = {
-            success: true,
-            data: tracking.tracking_data,
-          };
-        } catch (error: any) {
-          trackingResults[awb] = {
-            success: false,
-            error: error.message,
-          };
-        }
-      }
-    }
-
-    // Track by order numbers
-    if (orderNumbers && Array.isArray(orderNumbers)) {
-      for (const orderNumber of orderNumbers.slice(0, 10)) {
-        try {
-          // Get AWB from database
-          const { data: order } = await supabase
-            .from("orders")
-            .select("awb_code")
-            .eq("order_number", orderNumber)
-            .single();
-
-          if (order?.awb_code) {
-            const tracking = await trackByAWB(order.awb_code);
-            trackingResults[orderNumber] = {
-              success: true,
-              awb: order.awb_code,
-              data: tracking.tracking_data,
-            };
-          } else {
-            trackingResults[orderNumber] = {
-              success: false,
-              error: "Shipment not created yet",
-            };
-          }
-        } catch (error: any) {
-          trackingResults[orderNumber] = {
-            success: false,
-            error: error.message,
-          };
-        }
-      }
-    }
-
-    return NextResponse.json({
-      success: true,
-      tracking: trackingResults,
-    });
-
-  } catch (error: any) {
-    console.error("Bulk tracking error:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch tracking information" },
       { status: 500 }
     );
   }

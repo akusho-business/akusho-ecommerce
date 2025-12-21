@@ -1,3 +1,8 @@
+// ============================================
+// FILE: app/api/checkout/create-order/route.ts
+// PURPOSE: Create order with Razorpay + Dynamic shipping from Shiprocket
+// ============================================
+
 import { NextRequest, NextResponse } from "next/server";
 import Razorpay from "razorpay";
 import { createClient } from "@supabase/supabase-js";
@@ -27,7 +32,7 @@ export async function POST(request: NextRequest) {
       customer,
       shippingAddress,
       subtotal,
-      shipping = 70,
+      shipping = 70,       // Default fallback if not calculated
       discount = 0,
       couponCode,
       userId,
@@ -56,7 +61,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Calculate total
-    const total = subtotal + shipping - discount;
+    const shippingCost = shipping;
+    const total = subtotal + shippingCost - discount;
     const orderNumber = generateOrderNumber();
 
     // Create Razorpay order (amount in paise)
@@ -71,26 +77,59 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Create order in database with pending status
+    // Format items for storage
+    const formattedItems = items.map((item: any) => ({
+      id: item.id,
+      name: item.name,
+      price: item.price,
+      quantity: item.quantity,
+      image: item.image || item.image_url || null,
+      image_url: item.image || item.image_url || null,
+      sku: item.sku || null,
+    }));
+
+    // Create order in database with PENDING status
+    // IMPORTANT: Store address fields separately for order detail page to read
     const { data: order, error: orderError } = await supabase
       .from("orders")
       .insert({
+        // User & Order Info
         user_id: userId || null,
         order_number: orderNumber,
+        
+        // STATUS - MUST BE "pending" FOR NEW ORDERS!
         status: "pending",
         payment_status: "pending",
+        
+        // Razorpay
         razorpay_order_id: razorpayOrder.id,
+        
+        // Customer Info
         customer_name: customer.name,
         customer_email: customer.email,
         customer_phone: customer.phone,
-        shipping_address: JSON.stringify(shippingAddress),
-        items: items, // jsonb - store cart items directly
-        subtotal,
-        shipping,
-        discount,
+        
+        // Shipping Address - STORE AS INDIVIDUAL FIELDS (not JSON string!)
+        shipping_address: shippingAddress.address,
+        shipping_city: shippingAddress.city,
+        shipping_state: shippingAddress.state,
+        shipping_pincode: shippingAddress.pincode,
+        shipping_country: shippingAddress.country || "India",
+        
+        // Order Items (JSONB)
+        items: formattedItems,
+        
+        // Pricing
+        subtotal: subtotal,
+        shipping_cost: shippingCost,
+        shipping: shippingCost,  // Keep for backward compatibility
+        discount: discount,
         coupon_code: couponCode || null,
         total: total,
-        total_amount: total, // required field
+        total_amount: total,
+        
+        // Timestamps
+        created_at: new Date().toISOString(),
       })
       .select()
       .single();
@@ -98,7 +137,7 @@ export async function POST(request: NextRequest) {
     if (orderError) {
       console.error("Order creation error:", orderError);
       return NextResponse.json(
-        { error: "Failed to create order" },
+        { error: "Failed to create order", details: orderError.message },
         { status: 500 }
       );
     }
@@ -110,10 +149,10 @@ export async function POST(request: NextRequest) {
       orderNumber,
       amount: total,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Checkout error:", error);
     return NextResponse.json(
-      { error: "Something went wrong" },
+      { error: error.message || "Something went wrong" },
       { status: 500 }
     );
   }

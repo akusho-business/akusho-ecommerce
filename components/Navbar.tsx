@@ -252,8 +252,9 @@ export default function Navbar() {
                               <span>Account Settings</span>
                             </Link>
 
+                            {/* FIXED: Changed from /orders to /account/orders */}
                             <Link
-                              href="/orders"
+                              href="/account/orders"
                               onClick={() => setIsUserMenuOpen(false)}
                               className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-akusho-neon/10 transition-colors"
                             >
@@ -395,12 +396,21 @@ export default function Navbar() {
                       </div>
                     </div>
 
-                    <Link href="/account" onClick={() => setIsMenuOpen(false)} className="flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-akusho-neon/10 font-medium transition-colors">
+                    <Link 
+                      href="/account" 
+                      onClick={() => setIsMenuOpen(false)} 
+                      className="flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-akusho-neon/10 font-medium transition-colors"
+                    >
                       <Settings className="w-5 h-5" />
                       Account Settings
                     </Link>
 
-                    <Link href="/orders" onClick={() => setIsMenuOpen(false)} className="flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-akusho-neon/10 font-medium transition-colors">
+                    {/* FIXED: Changed from /orders to /account/orders */}
+                    <Link 
+                      href="/account/orders" 
+                      onClick={() => setIsMenuOpen(false)} 
+                      className="flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-akusho-neon/10 font-medium transition-colors"
+                    >
                       <Package className="w-5 h-5" />
                       My Orders
                     </Link>

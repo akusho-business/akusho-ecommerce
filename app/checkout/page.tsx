@@ -1,7 +1,11 @@
-// app/checkout/page.tsx
+// ============================================
+// FILE: app/checkout/page.tsx
+// PURPOSE: Checkout with dynamic Shiprocket shipping calculation
+// ============================================
+
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -21,12 +25,28 @@ import {
   CheckCircle,
   AlertCircle,
   X,
+  Package,
+  Clock,
+  Zap,
 } from "lucide-react";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 
-const SHIPPING_COST = 70;
+// Types
+interface ShippingData {
+  serviceable: boolean;
+  shipping_cost: number;
+  original_cost: number;
+  courier_name: string;
+  estimated_days: number;
+  message?: string;
+  free_shipping: {
+    threshold: number;
+    qualifies: boolean;
+    amount_needed: number;
+  };
+}
 
 // Loading Overlay Component
 function LoadingOverlay({
@@ -73,35 +93,6 @@ function LoadingOverlay({
 
   const current = statusConfig[status];
 
-  // SVG Icons
-  const icons = {
-    creating: (
-      <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke={current.iconColor} strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-      </svg>
-    ),
-    processing: (
-      <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke={current.iconColor} strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-      </svg>
-    ),
-    verifying: (
-      <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke={current.iconColor} strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-      </svg>
-    ),
-    success: (
-      <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke={current.iconColor} strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-    ),
-    error: (
-      <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke={current.iconColor} strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-    ),
-  };
-
   return (
     <AnimatePresence>
       {isVisible && (
@@ -117,7 +108,6 @@ function LoadingOverlay({
             exit={{ scale: 0.9, opacity: 0 }}
             className="bg-akusho-darker border border-akusho-neon/20 rounded-2xl p-8 max-w-sm w-full mx-4 text-center"
           >
-            {/* Animated Icon */}
             <motion.div
               animate={{
                 scale: [1, 1.05, 1],
@@ -129,62 +119,24 @@ function LoadingOverlay({
                 ease: "easeInOut",
               }}
               className="w-20 h-20 mx-auto mb-6 flex items-center justify-center rounded-full"
-              style={{ 
+              style={{
                 background: `linear-gradient(135deg, ${current.iconColor}15, ${current.iconColor}05)`,
                 border: `1px solid ${current.iconColor}30`,
               }}
             >
-              {icons[status]}
+              {status === "success" ? (
+                <CheckCircle className="w-10 h-10" style={{ color: current.iconColor }} />
+              ) : status === "error" ? (
+                <AlertCircle className="w-10 h-10" style={{ color: current.iconColor }} />
+              ) : (
+                <Loader2 className="w-10 h-10 animate-spin" style={{ color: current.iconColor }} />
+              )}
             </motion.div>
 
-            {/* Title */}
             <h3 className={`text-xl font-semibold mb-2 ${current.color}`}>
               {current.title}
             </h3>
-
-            {/* Subtitle */}
-            <p className="text-gray-400 text-sm mb-6">{current.subtitle}</p>
-
-            {/* Loading Bar */}
-            {(status === "creating" || status === "verifying" || status === "processing") && (
-              <div className="w-full h-1 bg-gray-800 rounded-full overflow-hidden">
-                <motion.div
-                  className="h-full rounded-full"
-                  style={{ 
-                    background: `linear-gradient(90deg, ${current.iconColor}, #8B5CF6, ${current.iconColor})`,
-                  }}
-                  animate={{ x: ["-100%", "100%"] }}
-                  transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
-                />
-              </div>
-            )}
-
-            {/* Success Checkmark Animation */}
-            {status === "success" && (
-              <motion.div
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ type: "spring", stiffness: 200, damping: 10 }}
-                className="w-14 h-14 mx-auto bg-green-500/10 border border-green-500/30 rounded-full flex items-center justify-center"
-              >
-                <motion.svg
-                  className="w-7 h-7 text-green-500"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <motion.path
-                    initial={{ pathLength: 0 }}
-                    animate={{ pathLength: 1 }}
-                    transition={{ duration: 0.5, delay: 0.2 }}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={3}
-                    d="M5 13l4 4L19 7"
-                  />
-                </motion.svg>
-              </motion.div>
-            )}
+            <p className="text-gray-400 text-sm">{current.subtitle}</p>
           </motion.div>
         </motion.div>
       )}
@@ -197,10 +149,16 @@ export default function CheckoutPage() {
   const { cart, cartCount, cartTotal, clearCart } = useCart();
   const { user, profile } = useAuth();
 
+  // Loading & Error states
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState<"creating" | "processing" | "verifying" | "success" | "error">("creating");
   const [error, setError] = useState("");
   const [isPaymentComplete, setIsPaymentComplete] = useState(false);
+
+  // Shipping state
+  const [shippingData, setShippingData] = useState<ShippingData | null>(null);
+  const [isCalculatingShipping, setIsCalculatingShipping] = useState(false);
+  const [shippingError, setShippingError] = useState("");
 
   // Coupon state
   const [couponCode, setCouponCode] = useState("");
@@ -248,6 +206,71 @@ export default function CheckoutPage() {
     }
   }, [user, profile]);
 
+  // Calculate shipping when pincode changes
+  const calculateShipping = useCallback(async (pincode: string) => {
+    if (!pincode || pincode.length !== 6) {
+      setShippingData(null);
+      return;
+    }
+
+    setIsCalculatingShipping(true);
+    setShippingError("");
+
+    try {
+      const response = await fetch("/api/shipping/calculate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          delivery_pincode: pincode,
+          weight: 0.5, // Default weight, adjust based on cart items if needed
+          cod: false,
+          declared_value: cartTotal,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.serviceable === false) {
+        setShippingError(data.message || "Delivery not available to this pincode");
+        setShippingData(null);
+      } else {
+        setShippingData(data);
+        setShippingError("");
+      }
+    } catch (err) {
+      console.error("Shipping calculation error:", err);
+      // Use fallback rate on error
+      setShippingData({
+        serviceable: true,
+        shipping_cost: 70,
+        original_cost: 70,
+        courier_name: "Standard Delivery",
+        estimated_days: 5,
+        free_shipping: {
+          threshold: 999,
+          qualifies: cartTotal >= 999,
+          amount_needed: Math.max(0, 999 - cartTotal),
+        },
+      });
+    } finally {
+      setIsCalculatingShipping(false);
+    }
+  }, [cartTotal]);
+
+  // Trigger shipping calculation when pincode is complete
+  useEffect(() => {
+    if (formData.pincode.length === 6) {
+      calculateShipping(formData.pincode);
+    }
+  }, [formData.pincode, calculateShipping]);
+
+  // Recalculate shipping when cart total changes (for free shipping threshold)
+  useEffect(() => {
+    if (formData.pincode.length === 6 && shippingData) {
+      calculateShipping(formData.pincode);
+    }
+  }, [cartTotal]);
+
   // Redirect if cart is empty (but not after successful payment)
   useEffect(() => {
     if (cartCount === 0 && !isPaymentComplete) {
@@ -260,11 +283,19 @@ export default function CheckoutPage() {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    
+    // For pincode, only allow digits and max 6 chars
+    if (name === "pincode") {
+      const cleanValue = value.replace(/\D/g, "").slice(0, 6);
+      setFormData((prev) => ({ ...prev, [name]: cleanValue }));
+    } else {
+      setFormData((prev) => ({ ...prev, [name]: value }));
+    }
+    
     setError("");
   };
 
-  // Apply coupon (only for logged in users)
+  // Apply coupon
   const handleApplyCoupon = async () => {
     if (!user) {
       setCouponError("Please login to apply coupon");
@@ -295,7 +326,6 @@ export default function CheckoutPage() {
         setCouponError("");
         toast.success(`Coupon applied!`, {
           description: `You save ₹${discountAmount.toFixed(0)}`,
-          icon: "🎉",
         });
       } else {
         setCouponError("Invalid coupon code");
@@ -316,7 +346,8 @@ export default function CheckoutPage() {
   // Calculate totals
   const subtotal = cartTotal;
   const discount = appliedCoupon?.discount || 0;
-  const total = subtotal + SHIPPING_COST - discount;
+  const shippingCost = shippingData?.shipping_cost ?? 70; // Fallback to 70 if not calculated
+  const total = subtotal + shippingCost - discount;
 
   // Validate form
   const validateForm = () => {
@@ -330,6 +361,7 @@ export default function CheckoutPage() {
     if (!formData.state.trim()) return "State is required";
     if (!formData.pincode.trim()) return "Pincode is required";
     if (!/^\d{6}$/.test(formData.pincode)) return "Invalid pincode (6 digits)";
+    if (shippingError) return "Delivery not available to this pincode";
     return null;
   };
 
@@ -365,7 +397,7 @@ export default function CheckoutPage() {
             pincode: formData.pincode,
           },
           subtotal,
-          shipping: SHIPPING_COST,
+          shipping: shippingCost,  // Dynamic shipping cost!
           discount,
           couponCode: appliedCoupon?.code,
           userId: user?.id || null,
@@ -404,7 +436,6 @@ export default function CheckoutPage() {
         image: "/logo.png",
         order_id: data.razorpayOrderId,
         handler: async function (response: any) {
-          // Payment successful - verify
           setLoadingStatus("verifying");
           toast.loading("Verifying payment...", { id: "verify-payment" });
 
@@ -426,7 +457,7 @@ export default function CheckoutPage() {
             if (verifyData.success) {
               setLoadingStatus("success");
               setIsPaymentComplete(true);
-              
+
               toast.success("Payment successful! 🎉", {
                 description: `Order #${verifyData.orderNumber} confirmed`,
                 duration: 5000,
@@ -434,7 +465,6 @@ export default function CheckoutPage() {
 
               clearCart();
 
-              // Redirect after showing success
               setTimeout(() => {
                 router.push(`/order-success?orderNumber=${verifyData.orderNumber}`);
               }, 1500);
@@ -445,9 +475,7 @@ export default function CheckoutPage() {
             toast.dismiss("verify-payment");
             setLoadingStatus("error");
             setError("Payment verification failed. Please contact support if amount was deducted.");
-            toast.error("Payment verification failed", {
-              description: "Please contact support if amount was deducted",
-            });
+            toast.error("Payment verification failed");
             setIsLoading(false);
           }
         },
@@ -461,31 +489,23 @@ export default function CheckoutPage() {
         },
         theme: {
           color: "#00A8FF",
-          backdrop_color: "rgba(0, 0, 0, 0.8)",
         },
         modal: {
           ondismiss: function () {
             setIsLoading(false);
             setLoadingStatus("creating");
-            toast.info("Payment cancelled", {
-              description: "You can try again when ready",
-            });
+            toast.info("Payment cancelled");
           },
-          escape: false,
-          backdropclose: false,
         },
       };
 
       const RazorpayConstructor = (window as any).Razorpay;
       const razorpay = new RazorpayConstructor(options);
-      
       razorpay.open();
     } catch (err: any) {
       setLoadingStatus("error");
       setError(err.message || "Something went wrong");
-      toast.error("Checkout failed", {
-        description: err.message || "Please try again",
-      });
+      toast.error("Checkout failed", { description: err.message });
       setIsLoading(false);
     }
   };
@@ -496,12 +516,7 @@ export default function CheckoutPage() {
 
   return (
     <>
-      {/* Loading Overlay */}
-      <LoadingOverlay 
-        isVisible={isLoading} 
-        status={loadingStatus} 
-        message={error}
-      />
+      <LoadingOverlay isVisible={isLoading} status={loadingStatus} message={error} />
 
       <main className="min-h-screen bg-gray-50 dark:bg-akusho-deepest pt-20 pb-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -615,6 +630,41 @@ export default function CheckoutPage() {
                   <div className="grid sm:grid-cols-3 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                        Pincode *
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          name="pincode"
+                          value={formData.pincode}
+                          onChange={handleInputChange}
+                          placeholder="400001"
+                          maxLength={6}
+                          className={`w-full px-4 py-3 bg-gray-50 dark:bg-akusho-dark border rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 transition-colors ${
+                            shippingError
+                              ? "border-red-500 focus:border-red-500 focus:ring-red-500"
+                              : shippingData?.serviceable
+                              ? "border-green-500 focus:border-green-500 focus:ring-green-500"
+                              : "border-gray-200 dark:border-akusho-neon/20 focus:border-akusho-neon focus:ring-akusho-neon"
+                          }`}
+                        />
+                        {isCalculatingShipping && (
+                          <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-akusho-neon animate-spin" />
+                        )}
+                        {!isCalculatingShipping && shippingData?.serviceable && (
+                          <CheckCircle className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-green-500" />
+                        )}
+                        {!isCalculatingShipping && shippingError && (
+                          <AlertCircle className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-red-500" />
+                        )}
+                      </div>
+                      {shippingError && (
+                        <p className="mt-1 text-xs text-red-500">{shippingError}</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                         City *
                       </label>
                       <input
@@ -640,23 +690,72 @@ export default function CheckoutPage() {
                         className="w-full px-4 py-3 bg-gray-50 dark:bg-akusho-dark border border-gray-200 dark:border-akusho-neon/20 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-akusho-neon focus:ring-1 focus:ring-akusho-neon transition-colors"
                       />
                     </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-                        Pincode *
-                      </label>
-                      <input
-                        type="text"
-                        name="pincode"
-                        value={formData.pincode}
-                        onChange={handleInputChange}
-                        placeholder="400001"
-                        maxLength={6}
-                        className="w-full px-4 py-3 bg-gray-50 dark:bg-akusho-dark border border-gray-200 dark:border-akusho-neon/20 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-akusho-neon focus:ring-1 focus:ring-akusho-neon transition-colors"
-                      />
-                    </div>
                   </div>
                 </div>
+
+                {/* Shipping Info Card */}
+                {shippingData?.serviceable && !shippingError && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    className="mt-4 p-4 bg-akusho-neon/5 border border-akusho-neon/20 rounded-xl"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-akusho-neon/10 rounded-lg">
+                          <Truck className="w-5 h-5 text-akusho-neon" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-white text-sm">
+                            {shippingData.courier_name}
+                          </p>
+                          <p className="text-gray-400 text-xs flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            Delivery in {shippingData.estimated_days} days
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        {shippingData.free_shipping.qualifies ? (
+                          <div>
+                            <span className="text-green-400 font-bold">FREE</span>
+                            <p className="text-xs text-gray-500 line-through">
+                              ₹{shippingData.original_cost}
+                            </p>
+                          </div>
+                        ) : (
+                          <span className="text-white font-bold">
+                            ₹{shippingData.shipping_cost}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Free shipping progress */}
+                    {!shippingData.free_shipping.qualifies && shippingData.free_shipping.amount_needed > 0 && (
+                      <div className="mt-3 pt-3 border-t border-akusho-neon/10">
+                        <div className="flex items-center justify-between text-xs mb-1">
+                          <span className="text-gray-400">Free shipping progress</span>
+                          <span className="text-akusho-neon">
+                            Add ₹{Math.ceil(shippingData.free_shipping.amount_needed)} more
+                          </span>
+                        </div>
+                        <div className="h-1.5 bg-akusho-dark rounded-full overflow-hidden">
+                          <motion.div
+                            className="h-full bg-gradient-to-r from-akusho-neon to-purple-500 rounded-full"
+                            initial={{ width: 0 }}
+                            animate={{
+                              width: `${Math.min(
+                                (cartTotal / shippingData.free_shipping.threshold) * 100,
+                                100
+                              )}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
               </motion.div>
 
               {/* Coupon Code */}
@@ -685,7 +784,7 @@ export default function CheckoutPage() {
                           {appliedCoupon.code}
                         </p>
                         <p className="text-sm text-green-600 dark:text-green-500">
-                          You save ₹{appliedCoupon.discount.toFixed(2)}
+                          You save ₹{appliedCoupon.discount.toFixed(0)}
                         </p>
                       </div>
                     </div>
@@ -783,7 +882,6 @@ export default function CheckoutPage() {
                   ))}
                 </div>
 
-                {/* Divider */}
                 <div className="h-px bg-gray-200 dark:bg-akusho-neon/20 my-4" />
 
                 {/* Pricing */}
@@ -792,13 +890,24 @@ export default function CheckoutPage() {
                     <span>Subtotal ({cartCount} items)</span>
                     <span>₹{subtotal.toLocaleString()}</span>
                   </div>
+                  
                   <div className="flex justify-between text-gray-600 dark:text-gray-400">
                     <span className="flex items-center gap-1">
                       <Truck className="w-4 h-4" />
                       Shipping
                     </span>
-                    <span>₹{SHIPPING_COST}</span>
+                    {isCalculatingShipping ? (
+                      <span className="flex items-center gap-1">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Calculating...
+                      </span>
+                    ) : shippingData?.free_shipping.qualifies ? (
+                      <span className="text-green-400 font-medium">FREE</span>
+                    ) : (
+                      <span>₹{shippingCost}</span>
+                    )}
                   </div>
+                  
                   {discount > 0 && (
                     <div className="flex justify-between text-green-600 dark:text-green-400">
                       <span>Discount</span>
@@ -807,7 +916,6 @@ export default function CheckoutPage() {
                   )}
                 </div>
 
-                {/* Divider */}
                 <div className="h-px bg-gray-200 dark:bg-akusho-neon/20 my-4" />
 
                 {/* Total */}
@@ -829,16 +937,19 @@ export default function CheckoutPage() {
                 {/* Pay Button */}
                 <button
                   onClick={handleCheckout}
-                  disabled={isLoading}
+                  disabled={isLoading || !!shippingError || isCalculatingShipping}
                   className="w-full py-4 bg-akusho-neon text-akusho-deepest font-bold rounded-xl hover:bg-akusho-neonLight transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{
-                    boxShadow: "0 0 20px rgba(0, 168, 255, 0.4)",
-                  }}
+                  style={{ boxShadow: "0 0 20px rgba(0, 168, 255, 0.4)" }}
                 >
                   {isLoading ? (
                     <>
                       <Loader2 className="w-5 h-5 animate-spin" />
                       Processing...
+                    </>
+                  ) : isCalculatingShipping ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Calculating Shipping...
                     </>
                   ) : (
                     <>
