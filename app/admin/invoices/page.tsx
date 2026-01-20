@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FileText,
@@ -22,14 +22,25 @@ import {
   Smartphone,
   Eye,
   Receipt,
+  Search,
 } from "lucide-react";
 import { toast } from "sonner";
 
 // Types
+interface Product {
+  id: number;
+  name: string;
+  price: number;
+  stock_quantity: number;
+  image_url: string;
+}
+
 interface InvoiceItem {
   name: string;
   quantity: number;
   price: number;
+  original_price: number;
+  product_id?: number;
 }
 
 interface Invoice {
@@ -394,7 +405,7 @@ export default function AdminInvoicesPage() {
   );
 }
 
-// Create Invoice Modal
+// Create Invoice Modal WITH PRODUCT AUTOCOMPLETE
 function CreateInvoiceModal({
   onClose,
   onSuccess,
@@ -413,26 +424,113 @@ function CreateInvoiceModal({
     notes: "",
     invoice_date: new Date().toISOString().split("T")[0],
   });
-  const [items, setItems] = useState<InvoiceItem[]>([
-    { name: "", quantity: 1, price: 0 },
-  ]);
+  const [items, setItems] = useState<InvoiceItem[]>([]);
   const [discount, setDiscount] = useState(0);
   const [tax, setTax] = useState(0);
+
+  // Product autocomplete states
+  const [products, setProducts] = useState<Product[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+
+  // Fetch products on mount
+  useEffect(() => {
+    fetchProducts();
+  }, []);
+
+  // Filter products based on search
+  useEffect(() => {
+    if (searchQuery.trim() === "") {
+      setFilteredProducts([]);
+      setShowDropdown(false);
+      return;
+    }
+
+    const filtered = products.filter((product) =>
+      product.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+    setFilteredProducts(filtered);
+    setShowDropdown(true);
+  }, [searchQuery, products]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+        setSearchQuery("");
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const fetchProducts = async () => {
+    setIsLoadingProducts(true);
+    try {
+      console.log("Fetching products from /api/products...");
+      const res = await fetch("/api/products");
+      
+      console.log("Response status:", res.status);
+      
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error("Response not OK:", errorText);
+        throw new Error(`Failed to fetch products: ${res.status}`);
+      }
+
+      const data = await res.json();
+      console.log("Products data received:", data);
+      
+      if (data.error) {
+        console.error("API returned error:", data.error);
+        throw new Error(data.error);
+      }
+
+      // Handle both {products: [...]} and [...] response formats
+      const productList = Array.isArray(data) ? data : (data.products || []);
+      console.log(`Successfully loaded ${productList.length} products`);
+      setProducts(productList);
+      
+      if (productList.length === 0) {
+        toast.info("No products available. Add products first.");
+      }
+      
+    } catch (err: any) {
+      console.error("Error fetching products:", err);
+      toast.error(err.message || "Failed to load products");
+      setProducts([]);
+    } finally {
+      setIsLoadingProducts(false);
+    }
+  };
+
+  const addProductToInvoice = (product: Product) => {
+    const newItem: InvoiceItem = {
+      name: product.name,
+      quantity: 1,
+      price: product.price,
+      original_price: product.price,
+      product_id: product.id,
+    };
+
+    setItems([...items, newItem]);
+    setSearchQuery("");
+    setShowDropdown(false);
+    toast.success(`${product.name} added`);
+  };
 
   // Calculate totals
   const subtotal = items.reduce((sum, item) => sum + item.quantity * item.price, 0);
   const total = subtotal - discount + tax;
 
-  // Add item
-  const addItem = () => {
-    setItems([...items, { name: "", quantity: 1, price: 0 }]);
-  };
-
   // Remove item
   const removeItem = (index: number) => {
-    if (items.length > 1) {
-      setItems(items.filter((_, i) => i !== index));
-    }
+    setItems(items.filter((_, i) => i !== index));
   };
 
   // Update item
@@ -452,8 +550,7 @@ function CreateInvoiceModal({
       return;
     }
 
-    const validItems = items.filter((item) => item.name && item.price > 0);
-    if (validItems.length === 0) {
+    if (items.length === 0) {
       toast.error("Please add at least one item");
       return;
     }
@@ -466,7 +563,7 @@ function CreateInvoiceModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...formData,
-          items: validItems,
+          items,
           subtotal,
           discount,
           tax,
@@ -589,33 +686,106 @@ function CreateInvoiceModal({
             </div>
           </div>
 
-          {/* Items */}
+          {/* Product Search & Items */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-heading text-sm text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                 Items
               </h3>
-              <button
-                type="button"
-                onClick={addItem}
-                className="text-sm text-purple-500 hover:text-purple-400 flex items-center gap-1"
-              >
-                <Plus className="w-4 h-4" />
-                Add Item
-              </button>
+              <span className="text-xs text-gray-400">
+                {items.length} item{items.length !== 1 ? "s" : ""} added
+              </span>
             </div>
 
+            {/* Product Search Dropdown */}
+            <div ref={searchRef} className="relative">
+              <div className="relative">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={
+                    isLoadingProducts 
+                      ? "Loading products..." 
+                      : products.length === 0 
+                        ? "No products available"
+                        : `Search from ${products.length} products...`
+                  }
+                  disabled={isLoadingProducts || products.length === 0}
+                  className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-akusho-darker border-2 border-gray-200 dark:border-purple-500/30 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+                {isLoadingProducts && (
+                  <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-purple-500 animate-spin" />
+                )}
+              </div>
+
+              {/* Product Dropdown */}
+              <AnimatePresence>
+                {showDropdown && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-akusho-dark border-2 border-purple-500/30 rounded-lg shadow-2xl max-h-64 overflow-y-auto z-10"
+                  >
+                    {filteredProducts.length > 0 ? (
+                      filteredProducts.map((product) => (
+                        <button
+                          key={product.id}
+                          type="button"
+                          onClick={() => addProductToInvoice(product)}
+                          className="w-full flex items-center gap-4 p-4 hover:bg-purple-50 dark:hover:bg-purple-500/10 transition-colors border-b border-gray-100 dark:border-purple-500/10 last:border-0 text-left"
+                        >
+                          {product.image_url && (
+                            <img
+                              src={product.image_url}
+                              alt={product.name}
+                              className="w-12 h-12 object-cover rounded border border-gray-200 dark:border-purple-500/20"
+                            />
+                          )}
+                          <div className="flex-1">
+                            <p className="text-gray-900 dark:text-white font-medium">
+                              {product.name}
+                            </p>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                              Stock: {product.stock_quantity}
+                            </p>
+                          </div>
+                          <p className="text-purple-600 dark:text-purple-400 font-semibold">
+                            ₹{product.price.toFixed(2)}
+                          </p>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="p-8 text-center text-gray-500 dark:text-gray-400">
+                        <Search className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                        <p className="text-sm">No products found matching "{searchQuery}"</p>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Added Items List */}
             <div className="space-y-3">
               {items.map((item, index) => (
-                <div key={index} className="flex gap-3 items-start">
+                <motion.div
+                  key={index}
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex gap-3 items-start bg-gray-50 dark:bg-akusho-darker border border-gray-200 dark:border-purple-500/20 rounded-lg p-3"
+                >
                   <div className="flex-1">
-                    <input
-                      type="text"
-                      value={item.name}
-                      onChange={(e) => updateItem(index, "name", e.target.value)}
-                      placeholder="Item name"
-                      className="w-full px-4 py-2.5 bg-gray-50 dark:bg-akusho-darker border border-gray-200 dark:border-purple-500/20 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    />
+                    <p className="text-gray-900 dark:text-white font-medium text-sm">
+                      {item.name}
+                    </p>
+                    {item.price !== item.original_price && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Original: ₹{item.original_price.toFixed(2)}
+                      </p>
+                    )}
                   </div>
                   <div className="w-20">
                     <input
@@ -624,35 +794,42 @@ function CreateInvoiceModal({
                       onChange={(e) => updateItem(index, "quantity", parseInt(e.target.value) || 1)}
                       min="1"
                       placeholder="Qty"
-                      className="w-full px-3 py-2.5 bg-gray-50 dark:bg-akusho-darker border border-gray-200 dark:border-purple-500/20 rounded-lg text-gray-900 dark:text-white text-center focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      className="w-full px-3 py-2 bg-white dark:bg-akusho-dark border border-gray-200 dark:border-purple-500/20 rounded text-gray-900 dark:text-white text-center text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                     />
                   </div>
                   <div className="w-28">
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">₹</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">₹</span>
                       <input
                         type="number"
                         value={item.price || ""}
                         onChange={(e) => updateItem(index, "price", parseFloat(e.target.value) || 0)}
                         min="0"
+                        step="0.01"
                         placeholder="Price"
-                        className="w-full pl-7 pr-3 py-2.5 bg-gray-50 dark:bg-akusho-darker border border-gray-200 dark:border-purple-500/20 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                        className="w-full pl-7 pr-3 py-2 bg-white dark:bg-akusho-dark border border-gray-200 dark:border-purple-500/20 rounded text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                       />
                     </div>
                   </div>
-                  <div className="w-24 py-2.5 text-right font-medium text-gray-900 dark:text-white">
+                  <div className="w-24 py-2 text-right font-medium text-gray-900 dark:text-white text-sm">
                     {formatCurrency(item.quantity * item.price)}
                   </div>
                   <button
                     type="button"
                     onClick={() => removeItem(index)}
-                    className="p-2.5 text-gray-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg"
-                    disabled={items.length === 1}
+                    className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-500/10 rounded"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
-                </div>
+                </motion.div>
               ))}
+
+              {items.length === 0 && (
+                <div className="text-center py-8 text-gray-400 dark:text-gray-500">
+                  <ShoppingBag className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">Search and add products above</p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -810,7 +987,7 @@ function CreateInvoiceModal({
   );
 }
 
-// View Invoice Modal
+// View Invoice Modal (unchanged)
 function ViewInvoiceModal({
   invoice,
   onClose,

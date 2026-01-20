@@ -17,6 +17,7 @@ export async function GET(request: NextRequest) {
     const activeOnly = searchParams.get("active") !== "false";
     const category = searchParams.get("category");
     const featured = searchParams.get("featured");
+    const forInvoice = searchParams.get("forInvoice") === "true"; // New param for invoice dropdown
 
     let query = supabaseAdmin.from("products").select("*");
 
@@ -32,6 +33,16 @@ export async function GET(request: NextRequest) {
       query = query.eq("is_featured", true);
     }
 
+    // For invoice dropdown, only show products with stock
+    if (forInvoice) {
+      // Try both column names to handle different schemas
+      try {
+        query = query.gt("stock_quantity", 0);
+      } catch {
+        query = query.gt("stock", 0);
+      }
+    }
+
     const { data: products, error } = await query.order("created_at", {
       ascending: false,
     });
@@ -41,7 +52,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message, products: [] }, { status: 500 });
     }
 
-    return NextResponse.json({ products: products || [] });
+    // Normalize the response - map stock to stock_quantity if needed
+    const normalizedProducts = (products || []).map((product: any) => ({
+      ...product,
+      stock_quantity: product.stock_quantity ?? product.stock ?? 0,
+    }));
+
+    return NextResponse.json({ products: normalizedProducts });
   } catch (error) {
     console.error("Products GET error:", error);
     return NextResponse.json(
@@ -51,7 +68,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST - Create new product
+// POST - Create new product (keeping your existing implementation)
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -62,9 +79,10 @@ export async function POST(request: NextRequest) {
       description,
       price,
       stock,
+      stock_quantity, // Support both
       category,
       image_url,
-      image, // Support both image and image_url
+      image,
       is_active,
       is_featured,
       is_new,
@@ -94,15 +112,18 @@ export async function POST(request: NextRequest) {
     // Use image_url or image field
     const imageValue = image_url || image || null;
 
+    const stockValue = stock_quantity ?? stock ?? 0;
+
     const productData = {
       name,
       slug,
       description: description || "",
       price: typeof price === "number" ? price : parseFloat(price) || 0,
-      stock: typeof stock === "number" ? stock : parseInt(stock) || 0,
+      stock: typeof stockValue === "number" ? stockValue : parseInt(stockValue) || 0,
+      stock_quantity: typeof stockValue === "number" ? stockValue : parseInt(stockValue) || 0,
       category: category || null,
       image_url: imageValue,
-      image: imageValue, // Also set image column for compatibility
+      image: imageValue,
       is_active: is_active !== undefined ? is_active : true,
       is_featured: is_featured !== undefined ? is_featured : false,
       is_new: is_new !== undefined ? is_new : true,

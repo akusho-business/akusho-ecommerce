@@ -14,11 +14,11 @@ const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
-    maximumFractionDigits: 0,
+    maximumFractionDigits: 2,
   }).format(amount);
 };
 
-// Generate invoice HTML email
+// Generate invoice email HTML
 function generateInvoiceEmail(invoice: any): string {
   const itemsHtml = invoice.items
     .map(
@@ -27,7 +27,7 @@ function generateInvoiceEmail(invoice: any): string {
         <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">${item.name}</td>
         <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: center;">${item.quantity}</td>
         <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCurrency(item.price)}</td>
-        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCurrency(item.quantity * item.price)}</td>
+        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: right; font-weight: 600;">${formatCurrency(item.quantity * item.price)}</td>
       </tr>
     `
     )
@@ -40,128 +40,143 @@ function generateInvoiceEmail(invoice: any): string {
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
     </head>
-    <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f3f4f6;">
-      <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
+    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; background-color: #f3f4f6;">
+      <div style="max-width: 650px; margin: 0 auto; background-color: #ffffff;">
         
         <!-- Header -->
-        <div style="background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 100%); padding: 40px 30px; text-align: center;">
-          <h1 style="margin: 0; color: #00A8FF; font-size: 32px; letter-spacing: 4px; text-shadow: 0 0 20px rgba(0, 168, 255, 0.5);">
-            AKUSHO
-          </h1>
-          <p style="margin: 8px 0 0; color: #a855f7; font-size: 14px; letter-spacing: 2px;">
-            PREMIUM ANIME COLLECTIBLES
-          </p>
+        <div style="background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 100%); padding: 45px 35px; text-align: center;">
+          <h1 style="margin: 0; color: #00A8FF; font-size: 38px; letter-spacing: 6px; text-shadow: 0 0 25px rgba(0, 168, 255, 0.6); font-weight: 900;">AKUSHO</h1>
+          <p style="margin: 10px 0 0; color: #a855f7; font-size: 15px; letter-spacing: 3px; font-weight: 600;">PREMIUM ANIME COLLECTIBLES</p>
         </div>
 
-        <!-- Thank You Message -->
-        <div style="background: linear-gradient(135deg, #a855f7 0%, #6366f1 100%); padding: 30px; text-align: center;">
-          <h2 style="margin: 0; color: #ffffff; font-size: 24px;">
-            🎉 Thank You for Shopping!
-          </h2>
-          <p style="margin: 10px 0 0; color: rgba(255,255,255,0.9); font-size: 16px;">
-            Thank you for shopping from <strong>AKUSHO Offline</strong>
-          </p>
-          ${invoice.stall_location ? `<p style="margin: 5px 0 0; color: rgba(255,255,255,0.7); font-size: 14px;">📍 ${invoice.stall_location}</p>` : ""}
+        <!-- Thank You Banner -->
+        <div style="background: linear-gradient(135deg, #a855f7 0%, #6366f1 100%); padding: 35px; text-align: center;">
+          <h2 style="margin: 0; color: #ffffff; font-size: 26px; font-weight: 700;">🎉 Thank You for Shopping!</h2>
+          <p style="margin: 12px 0 0; color: rgba(255,255,255,0.95); font-size: 17px;">Your purchase from <strong>AKUSHO Offline</strong></p>
+          ${invoice.stall_location ? `<p style="margin: 8px 0 0; color: rgba(255,255,255,0.8); font-size: 15px;">📍 ${invoice.stall_location}</p>` : ""}
         </div>
 
         <!-- Invoice Details -->
-        <div style="padding: 30px;">
+        <div style="padding: 35px;">
+          
           <!-- Invoice Header -->
-          <div style="display: flex; justify-content: space-between; margin-bottom: 30px; border-bottom: 2px solid #e5e7eb; padding-bottom: 20px;">
-            <div>
-              <h3 style="margin: 0 0 5px; color: #374151; font-size: 18px;">Invoice</h3>
-              <p style="margin: 0; color: #00A8FF; font-size: 20px; font-weight: bold;">${invoice.invoice_number}</p>
-            </div>
-            <div style="text-align: right;">
-              <p style="margin: 0 0 5px; color: #6b7280; font-size: 14px;">Date</p>
-              <p style="margin: 0; color: #374151; font-size: 16px; font-weight: 500;">
-                ${new Date(invoice.invoice_date).toLocaleDateString("en-IN", {
-                  day: "numeric",
-                  month: "long",
-                  year: "numeric",
-                })}
-              </p>
-            </div>
+          <div style="margin-bottom: 35px; padding-bottom: 25px; border-bottom: 3px solid #e5e7eb;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="width: 50%; vertical-align: top;">
+                  <h3 style="margin: 0 0 8px; color: #374151; font-size: 19px; font-weight: 700;">Invoice</h3>
+                  <p style="margin: 0; color: #00A8FF; font-size: 22px; font-weight: bold;">${invoice.invoice_number}</p>
+                </td>
+                <td style="width: 50%; text-align: right; vertical-align: top;">
+                  <p style="margin: 0 0 8px; color: #6b7280; font-size: 15px; font-weight: 600;">Date</p>
+                  <p style="margin: 0; color: #374151; font-size: 17px; font-weight: 600;">
+                    ${new Date(invoice.invoice_date).toLocaleDateString("en-IN", {
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric",
+                    })}
+                  </p>
+                </td>
+              </tr>
+            </table>
           </div>
 
           <!-- Customer Info -->
-          <div style="background-color: #f9fafb; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
-            <h4 style="margin: 0 0 10px; color: #374151; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">
-              Bill To
-            </h4>
-            <p style="margin: 0; color: #111827; font-size: 16px; font-weight: 600;">${invoice.customer_name}</p>
-            <p style="margin: 5px 0 0; color: #6b7280; font-size: 14px;">${invoice.customer_email}</p>
-            ${invoice.customer_phone ? `<p style="margin: 5px 0 0; color: #6b7280; font-size: 14px;">📞 ${invoice.customer_phone}</p>` : ""}
+          <div style="background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%); padding: 25px; border-radius: 12px; margin-bottom: 30px; border: 2px solid #e5e7eb;">
+            <h4 style="margin: 0 0 12px; color: #374151; font-size: 13px; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 700;">Bill To</h4>
+            <p style="margin: 0; color: #111827; font-size: 17px; font-weight: 700;">${invoice.customer_name}</p>
+            <p style="margin: 8px 0 0; color: #6b7280; font-size: 15px;">${invoice.customer_email}</p>
+            ${invoice.customer_phone ? `<p style="margin: 6px 0 0; color: #6b7280; font-size: 15px;">📞 ${invoice.customer_phone}</p>` : ""}
           </div>
 
           <!-- Items Table -->
-          <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px;">
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-radius: 10px; overflow: hidden;">
             <thead>
-              <tr style="background-color: #1a1a2e;">
-                <th style="padding: 12px; text-align: left; color: #00A8FF; font-size: 14px;">Item</th>
-                <th style="padding: 12px; text-align: center; color: #00A8FF; font-size: 14px;">Qty</th>
-                <th style="padding: 12px; text-align: right; color: #00A8FF; font-size: 14px;">Price</th>
-                <th style="padding: 12px; text-align: right; color: #00A8FF; font-size: 14px;">Total</th>
+              <tr style="background: linear-gradient(135deg, #1a1a2e 0%, #2a2a3e 100%);">
+                <th style="padding: 15px; text-align: left; color: #00A8FF; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">Item</th>
+                <th style="padding: 15px; text-align: center; color: #00A8FF; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">Qty</th>
+                <th style="padding: 15px; text-align: right; color: #00A8FF; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">Price</th>
+                <th style="padding: 15px; text-align: right; color: #00A8FF; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">Total</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody style="background: white;">
               ${itemsHtml}
             </tbody>
           </table>
 
           <!-- Totals -->
-          <div style="border-top: 2px solid #e5e7eb; padding-top: 20px;">
-            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-              <span style="color: #6b7280;">Subtotal</span>
-              <span style="color: #374151;">${formatCurrency(invoice.subtotal)}</span>
-            </div>
-            ${
-              invoice.discount > 0
-                ? `
-            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-              <span style="color: #10b981;">Discount</span>
-              <span style="color: #10b981;">-${formatCurrency(invoice.discount)}</span>
-            </div>
-            `
-                : ""
-            }
-            ${
-              invoice.tax > 0
-                ? `
-            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-              <span style="color: #6b7280;">Tax</span>
-              <span style="color: #374151;">${formatCurrency(invoice.tax)}</span>
-            </div>
-            `
-                : ""
-            }
-            <div style="display: flex; justify-content: space-between; margin-top: 15px; padding-top: 15px; border-top: 2px solid #1a1a2e;">
-              <span style="color: #111827; font-size: 18px; font-weight: bold;">Total</span>
-              <span style="color: #00A8FF; font-size: 24px; font-weight: bold;">${formatCurrency(invoice.total)}</span>
+          <div style="border-top: 3px solid #e5e7eb; padding-top: 25px;">
+            <table style="width: 100%; max-width: 400px; margin-left: auto; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 5px 0; color: #6b7280; font-size: 15px;">Subtotal</td>
+                <td style="padding: 5px 0; text-align: right; color: #374151; font-size: 15px; font-weight: 600;">${formatCurrency(invoice.subtotal)}</td>
+              </tr>
+              ${invoice.discount > 0 ? `
+              <tr>
+                <td style="padding: 5px 0; color: #10b981; font-size: 15px; font-weight: 600;">💰 Discount</td>
+                <td style="padding: 5px 0; text-align: right; color: #10b981; font-size: 15px; font-weight: 700;">-${formatCurrency(invoice.discount)}</td>
+              </tr>` : ""}
+              ${invoice.tax > 0 ? `
+              <tr>
+                <td style="padding: 5px 0; color: #6b7280; font-size: 15px;">Tax</td>
+                <td style="padding: 5px 0; text-align: right; color: #374151; font-size: 15px; font-weight: 600;">${formatCurrency(invoice.tax)}</td>
+              </tr>` : ""}
+            </table>
+            
+            <div style="margin-top: 18px; padding: 20px; background: linear-gradient(135deg, #1a1a2e 0%, #2a2a3e 100%); border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="color: #ffffff; font-size: 19px; font-weight: 700; letter-spacing: 1px;">TOTAL</td>
+                  <td style="text-align: right; color: #00A8FF; font-size: 26px; font-weight: 900;">${formatCurrency(invoice.total)}</td>
+                </tr>
+              </table>
             </div>
           </div>
 
           <!-- Payment Status -->
-          <div style="margin-top: 25px; padding: 15px; background-color: ${invoice.payment_status === "paid" ? "#d1fae5" : "#fef3c7"}; border-radius: 8px; text-align: center;">
-            <span style="color: ${invoice.payment_status === "paid" ? "#065f46" : "#92400e"}; font-weight: 600;">
-              ${invoice.payment_status === "paid" ? "✅ Payment Received" : "⏳ Payment Pending"} 
-              ${invoice.payment_method ? `via ${invoice.payment_method.toUpperCase()}` : ""}
+          <div style="margin-top: 30px; padding: 18px; background: ${invoice.payment_status === "paid" ? "linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)" : "linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)"}; border-radius: 10px; text-align: center; border: 2px solid ${invoice.payment_status === "paid" ? "#10b981" : "#f59e0b"};">
+            <span style="color: ${invoice.payment_status === "paid" ? "#065f46" : "#92400e"}; font-weight: 700; font-size: 16px;">
+              ${invoice.payment_status === "paid" ? "✅ PAID" : "⏳ PENDING"} via ${invoice.payment_method.toUpperCase()}
             </span>
           </div>
         </div>
 
+        <!-- MASSIVE COUPON SECTION -->
+        <div style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); padding: 40px 35px; margin: 25px; border-radius: 16px; border: 4px dashed #f59e0b; text-align: center; box-shadow: 0 8px 16px rgba(245, 158, 11, 0.3);">
+          <h2 style="margin: 0 0 15px; color: #92400e; font-size: 28px; font-weight: 900;">🎁 EXCLUSIVE DISCOUNT COUPON!</h2>
+          <div style="background: #ffffff; padding: 30px; border-radius: 12px; margin: 25px 0; box-shadow: 0 6px 12px rgba(0,0,0,0.12);">
+            <p style="margin: 0 0 12px; color: #6b7280; font-size: 13px; text-transform: uppercase; letter-spacing: 2px; font-weight: 700;">Your Exclusive Code</p>
+            <p style="margin: 0; color: #a855f7; font-size: 48px; font-weight: 900; font-family: 'Courier New', monospace; letter-spacing: 8px; text-shadow: 0 2px 4px rgba(168, 85, 247, 0.3);">CHRIST10</p>
+          </div>
+          <div style="background: #ffffff; padding: 25px; border-radius: 12px; margin-bottom: 20px;">
+            <p style="margin: 0 0 12px; color: #92400e; font-size: 22px; font-weight: 900;">🎉 Get 10% OFF + FREE SHIPPING 🎉</p>
+            <p style="margin: 0; color: #78350f; font-size: 16px; font-weight: 600;">Use this code on your next online purchase</p>
+            <p style="margin: 8px 0 0; color: #00A8FF; font-size: 18px; font-weight: 700;">www.akusho.com</p>
+          </div>
+          <div style="background: rgba(255,255,255,0.5); padding: 15px; border-radius: 8px;">
+            <p style="margin: 0; color: #78350f; font-size: 14px; font-weight: 600;">
+              ✓ Valid on ALL products | ✓ No minimum order | ✓ One-time use per customer
+            </p>
+          </div>
+        </div>
+
+        <!-- Notes -->
+        ${invoice.notes ? `
+        <div style="margin: 25px; padding: 20px; background: #f9fafb; border-left: 4px solid #00A8FF; border-radius: 8px;">
+          <p style="margin: 0; color: #6b7280; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Notes</p>
+          <p style="margin: 0; color: #374151; font-size: 14px;">${invoice.notes}</p>
+        </div>` : ""}
+
         <!-- Footer -->
-        <div style="background-color: #1a1a2e; padding: 30px; text-align: center;">
-          <p style="margin: 0 0 10px; color: #a855f7; font-size: 14px;">
-            Follow us for more amazing collectibles!
+        <div style="background: linear-gradient(135deg, #1a1a2e 0%, #0a0a0f 100%); padding: 35px; text-align: center;">
+          <p style="margin: 0 0 12px; color: #a855f7; font-size: 15px; font-weight: 600;">Follow us for more amazing collectibles!</p>
+          <p style="margin: 0 0 25px; color: #9ca3af; font-size: 13px;">
+            📷 Instagram: @akusho_official | 🐦 Twitter: @akusho_store
           </p>
-          <p style="margin: 0 0 20px; color: #9ca3af; font-size: 12px;">
-            Instagram: @akusho_official | Twitter: @akusho_store
-          </p>
-          <p style="margin: 0; color: #6b7280; font-size: 12px;">
+          <p style="margin: 0 0 15px; color: #6b7280; font-size: 13px;">
             © ${new Date().getFullYear()} AKUSHO. All rights reserved.
           </p>
-          <p style="margin: 10px 0 0; color: #4b5563; font-size: 11px;">
+          <p style="margin: 0; color: #4b5563; font-size: 12px;">
             Questions? Reply to this email or contact support@akusho.com
           </p>
         </div>
@@ -181,7 +196,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invoice ID required" }, { status: 400 });
     }
 
-    // Fetch invoice
     const { data: invoice, error: fetchError } = await supabase
       .from("offline_invoices")
       .select("*")
@@ -194,10 +208,9 @@ export async function POST(request: NextRequest) {
 
     console.log("Sending invoice email to:", invoice.customer_email);
 
-    // Check if Resend is configured
     if (!process.env.RESEND_API_KEY) {
       return NextResponse.json(
-        { error: "Email service not configured. Add RESEND_API_KEY to .env" },
+        { error: "Email service not configured" },
         { status: 500 }
       );
     }
@@ -209,7 +222,7 @@ export async function POST(request: NextRequest) {
     const { data: emailData, error: emailError } = await resend.emails.send({
       from: process.env.RESEND_FROM_EMAIL || "AKUSHO <noreply@akusho.com>",
       to: invoice.customer_email,
-      subject: `Your AKUSHO Invoice ${invoice.invoice_number} - Thank You! 🎉`,
+      subject: `🎁 Your AKUSHO Invoice ${invoice.invoice_number} + 10% OFF Coupon!`,
       html: emailHtml,
     });
 
@@ -221,7 +234,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Update invoice - mark email as sent
     await supabase
       .from("offline_invoices")
       .update({
